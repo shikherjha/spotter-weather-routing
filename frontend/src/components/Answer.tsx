@@ -2,7 +2,7 @@ import type { Trip } from "../api/types";
 import { duration, longWhen } from "../lib/time";
 import { leaveLater, routeStatus, verdict } from "../lib/trip";
 import { useUi } from "../state";
-import { Shield, WarnIcon } from "./bits";
+import { CheckIcon, Shield, WarnIcon } from "./bits";
 
 export function TripLine({ trip, onEdit }: { trip: Trip; onEdit: () => void }) {
   const short = (label: string) => label.split(",")[0];
@@ -37,7 +37,7 @@ export function Verdict({ trip }: { trip: Trip }) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="flex items-center gap-1.5 text-[13px] font-semibold text-ink-2">
-        <WarnIcon /> {v.label}
+        {v.advice === "go" ? <CheckIcon /> : <WarnIcon />} {v.label}
       </span>
       <h1 className="m-0 text-[28px] leading-[34px] font-bold">{v.headline}</h1>
       <p className="m-0 text-[15px] leading-[22px]">{v.sentence}</p>

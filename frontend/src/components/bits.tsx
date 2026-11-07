@@ -41,6 +41,15 @@ export function WarnIcon({ className = "" }: { className?: string }) {
   );
 }
 
+export function CheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="7" cy="7" r="5.8" />
+      <path d="M4.5 7.2 L6.3 9 L9.6 5.4" />
+    </svg>
+  );
+}
+
 export function PlayIcon({ playing }: { playing: boolean }) {
   return playing ? (
     <svg width="14" height="14" viewBox="0 0 10 10" aria-hidden="true">
