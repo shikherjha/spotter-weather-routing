@@ -151,3 +151,44 @@ async def triage(alerts: list[Alert]) -> dict[str, Triage]:
         return a.id, t
 
     return dict(await asyncio.gather(*(one(a) for a in alerts)))
+
+
+# --- Reading a typed trip: which day and hour the driver means ("tomorrow after lunch").
+# Jev can't do date arithmetic, so code offers concrete labelled days; Jev only matches words to them.
+# "unstated" goes first: if Jev leans on the first option, it leans towards not guessing.
+
+
+@dataclass(frozen=True, slots=True)
+class Departure:
+    day: str  # a key of the offered days, or "unstated"
+    day_confidence: float
+    hour: str  # "h00".."h23", "now" or "unstated"
+    hour_confidence: float
+
+
+HOURS: dict[str, str] = {"unstated": "No time of day is mentioned", "now": "Right now, as soon as possible"} | {
+    f"h{h:02d}": f"{(h % 12) or 12} {'AM' if h < 12 else 'PM'}"
+    + (" (midnight)" if h == 0 else " (noon)" if h == 12 else "")
+    for h in range(24)
+}
+
+
+async def read_departure(text: str, days: dict[str, str]) -> Departure | None:
+    """Day and hour the text asks to leave, as keys of `days` / HOURS; None if Jev is unavailable."""
+    jev = _client()
+    if jev is None:
+        return None
+    questions: dict[str, Question] = {
+        "day": Choice(
+            instructions="On which day does the driver want to leave?",
+            criteria={"unstated": "No day is mentioned"} | days,
+        ),
+        "hour": Choice(instructions="At about what time of day does the driver want to leave?", criteria=HOURS),
+    }
+    try:
+        res = await jev.system_one(state=text, questions=questions)
+    except (TypeSafeError, TimeoutError) as e:
+        log.warning("jev could not read the departure: %s", type(e).__name__)
+        return None
+    day, hour = res.choices["day"], res.choices["hour"]
+    return Departure(day.choice, day.confidence, hour.choice, hour.confidence)

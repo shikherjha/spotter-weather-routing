@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from engine.rules import WindBasis
 from engine.scoring import Advice
@@ -215,6 +216,32 @@ class TripOut(BaseModel):
     warnings: list[WarningOut] = []
     warnings_status: Literal["ok", "unavailable"] = "ok"
     timings: TimingsOut
+
+
+class ParseIn(BaseModel):
+    text: str = Field(min_length=3, max_length=300)
+    tz: str = Field(default="America/Chicago", description="The browser's time zone, used if no origin is found")
+
+    @field_validator("tz")
+    @classmethod
+    def _known_zone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError):
+            return "America/Chicago"
+        return v
+
+
+class ParsedTripOut(BaseModel):
+    """Form fields read from a sentence; null = not found. The driver checks them before planning."""
+
+    origin: PlaceOut | None
+    destination: PlaceOut | None
+    departure_local: str | None
+    load_lb: float | None
+    interval_mi: Literal[10, 25, 50] | None
+    unsure: list[Literal["origin", "destination", "departure"]]
+    read_by: Literal["jev", "rules"]
 
 
 class PlaceSuggestion(BaseModel):

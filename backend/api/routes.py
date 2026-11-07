@@ -7,6 +7,7 @@ from pydantic import Field
 from providers.http import UpstreamError
 from providers.places import search_places
 from trips import schemas as s
+from trips.parse import parse_trip
 from trips.service import TripError, get_trip, plan_trip
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,12 @@ async def health(request: HttpRequest) -> Health:
 async def places(request: HttpRequest, query: Query[PlacesQuery]) -> list[s.PlaceSuggestion]:
     found = await search_places(query.q)
     return [s.PlaceSuggestion(label=p.label, lat=p.lat, lon=p.lon) for p in found]
+
+
+@api.post("/parse", response=s.ParsedTripOut)
+async def parse(request: HttpRequest, body: s.ParseIn) -> s.ParsedTripOut:
+    """Fill the trip form from one typed sentence; the driver confirms before planning."""
+    return await parse_trip(body.text, body.tz)
 
 
 @api.post("/trips", response={200: s.TripOut, 422: s.ErrorOut, 502: s.ErrorOut, 503: s.ErrorOut})
