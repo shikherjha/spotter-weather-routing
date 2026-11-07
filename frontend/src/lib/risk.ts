@@ -7,7 +7,7 @@ export const LEVEL_NAMES = ["Low", "Moderate", "High", "Severe", "No Travel"] as
 
 const hex = (h: string): RGB => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
-/** Map colours per level. Low is green so it never blends into the land. */
+/** Map colours per level. Low is green so it never blends into the land. Keep in step with --risk-* in index.css. */
 export const RISK_HEX: Record<Theme, readonly string[]> = {
   light: ["#8CC27E", "#E3A920", "#E07B39", "#C62F2B", "#4A0D1E"],
   dark: ["#4F8A47", "#E9B949", "#E8833F", "#E5483C", "#B23A55"],
@@ -50,7 +50,7 @@ const BANDS: Record<Factor, readonly string[]> = {
 };
 
 /** Why a checkpoint got its level, in words: "Snow 2–3 in/hr", "Wind 35–44 mph with over 40,000 lb". */
-export function why(cp: Checkpoint): string {
+export function levelReason(cp: Checkpoint): string {
   if (cp.level === null) return "Beyond the forecast";
   if (cp.level === 0) return "";
   const f = mainFactor(cp);
@@ -61,7 +61,7 @@ export function why(cp: Checkpoint): string {
 }
 
 /** The reading that matters most at a checkpoint: "Snow 2.2 in/hr", "Wind 46 mph, gusts 64". */
-export function reading(cp: Checkpoint): string {
+export function mainReading(cp: Checkpoint): string {
   const f = mainFactor(cp);
   if (cp.level && f === "snow" && cp.snow_in_hr !== null) return `Snow ${cp.snow_in_hr.toFixed(1)} in/hr`;
   if (cp.level && f === "rain" && cp.rain_in_hr !== null) return `Rain ${cp.rain_in_hr.toFixed(2)} in/hr`;

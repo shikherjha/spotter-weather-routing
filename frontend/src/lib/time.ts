@@ -1,6 +1,6 @@
 // Every clock time on screen carries its zone, because routes cross time zones.
 
-const HOUR = 3600;
+export const HOUR = 3600;
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 function parts(epochS: number, tz: string) {
@@ -66,9 +66,17 @@ export function duration(seconds: number): string {
   return h ? `${h} h ${m % 60} m` : `${m} m`;
 }
 
-/** "12 h from now" for the slider */
-export function fromNow(hours: number): string {
-  return hours === 0 ? "Now" : `${hours} h from now`;
+/** "Now", "12 h from now" or "3 h ago": a trip opened from a link can be hours old. */
+export function relativeToNow(epochS: number, nowS = Date.now() / 1000): string {
+  const h = (epochS - nowS) / HOUR;
+  if (h > -1 && h < 0.5) return "Now"; // the slider's hours start on the hour, so this hour is "now"
+  return h > 0 ? `${Math.round(h)} h from now` : `${Math.round(-h)} h ago`;
+}
+
+export function sameDay(a: number, b: number, tz: string): boolean {
+  const pa = parts(a, tz);
+  const pb = parts(b, tz);
+  return pa.month === pb.month && pa.day === pb.day;
 }
 
 /** Wall-clock "YYYY-MM-DDTHH:mm" in `tz`, for the API's departure_local and <input type=datetime-local>. */
@@ -87,10 +95,9 @@ export function localInput(epochS: number, tz: string): string {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
-export function nextHourInput(): string {
-  const now = Date.now() / 1000;
-  const next = Math.ceil(now / HOUR) * HOUR + HOUR;
-  return localInput(next, Intl.DateTimeFormat().resolvedOptions().timeZone);
+/** The next whole hour, as a datetime-local value in `tz` (the browser's zone by default). */
+export function nextHourInput(tz = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+  return localInput((Math.floor(Date.now() / 1000 / HOUR) + 1) * HOUR, tz);
 }
 
 /** "Mountain time" */

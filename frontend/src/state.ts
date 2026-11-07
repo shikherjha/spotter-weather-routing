@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Checkpoint, TripRequest } from "./api/types";
+import type { Checkpoint } from "./api/types";
 import type { Theme } from "./lib/risk";
 
 export type Panel = "stops" | "timeline" | null;
@@ -11,16 +11,15 @@ export interface Focus {
 }
 
 interface UiState {
-  /** Hours from the heatmap start shown on the map (0..48). */
+  /** Hours from the heatmap start shown on the map. */
   hour: number;
   weatherOn: boolean;
   playing: boolean;
+  /** Picked route; null means the recommended one. */
   selected: string | null;
   panel: Panel;
   focus: Focus | null;
   theme: Theme;
-  /** The last request, so "Edit" and "Leave later" can re-plan from it. */
-  request: TripRequest | null;
 
   setHour: (h: number) => void;
   setWeather: (on: boolean) => void;
@@ -29,19 +28,11 @@ interface UiState {
   openPanel: (p: Panel) => void;
   setFocus: (f: Focus | null) => void;
   toggleTheme: () => void;
-  setRequest: (r: TripRequest) => void;
-  resetView: (routeId: string, hour: number) => void;
+  resetView: () => void;
 }
 
-const savedTheme = (): Theme => {
-  try {
-    const t = localStorage.getItem("theme");
-    if (t === "light" || t === "dark") return t;
-  } catch {
-    /* storage blocked: fall back to the system setting */
-  }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-};
+/** The theme index.html applied before React loaded (saved choice, else the system setting). */
+const initialTheme = (): Theme => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
 
 export const useUi = create<UiState>((set) => ({
   hour: 0,
@@ -50,26 +41,25 @@ export const useUi = create<UiState>((set) => ({
   selected: null,
   panel: null,
   focus: null,
-  theme: savedTheme(),
-  request: null,
+  theme: initialTheme(),
 
   // Moving the time means you want to see the weather at that time.
   setHour: (hour) => set({ hour, weatherOn: true }),
   setWeather: (weatherOn) => set((s) => ({ weatherOn, playing: weatherOn && s.playing })),
   setPlaying: (playing) => set((s) => ({ playing, weatherOn: playing || s.weatherOn })),
-  select: (selected) => set({ selected, focus: null }),
+  select: (selected) => set((s) => (s.selected === selected ? {} : { selected, focus: null })),
   openPanel: (panel) => set({ panel, focus: null }),
   setFocus: (focus) => set({ focus }),
   toggleTheme: () =>
     set((s) => {
       const theme = s.theme === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = theme;
       try {
         localStorage.setItem("theme", theme);
       } catch {
-        /* not persisted; fine */
+        // Storage blocked: the choice lasts for this visit only.
       }
       return { theme };
     }),
-  setRequest: (request) => set({ request }),
-  resetView: (selected, hour) => set({ selected, hour, weatherOn: false, playing: false, panel: null, focus: null }),
+  resetView: () => set({ selected: null, hour: 0, weatherOn: false, playing: false, panel: null, focus: null }),
 }));

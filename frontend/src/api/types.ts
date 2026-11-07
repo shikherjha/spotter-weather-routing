@@ -1,4 +1,5 @@
-// Mirrors backend/trips/schemas.py (the API contract). Keep the two in step.
+// Mirrors backend/trips/schemas.py, the API contract. Written by hand because openapi-typescript
+// doesn't support TypeScript 7 yet; keep the two in step.
 
 export type Level = 0 | 1 | 2 | 3 | 4; // Low, Moderate, High, Severe, No Travel
 export type Advice = "go" | "caution" | "delay";
@@ -16,8 +17,11 @@ export interface TripRequest {
   load_lb: number;
   interval_mi: 10 | 25 | 50;
   hos: boolean;
-  weather: "live" | "demo_storm";
+  weather: "live" | typeof DEMO_WEATHER;
 }
+
+/** Request value and returned weather_model of the simulated demo storm. */
+export const DEMO_WEATHER = "demo_storm";
 
 export interface Stop {
   mile: number;
@@ -100,11 +104,7 @@ export interface Heatmap {
   start: number;
   hours: number;
   risk: string; // base64 uint8[cells x hours]; 0-4, 255 = no data
-  samples: number;
-  sample_of: number[];
-  sample_wind: string;
-  sample_rain: string;
-  sample_snow: string;
+  resolution: number; // H3 resolution of `cells`
 }
 
 export interface WarningHit {
@@ -126,7 +126,7 @@ export interface Warning {
   summary: string; // the alert's own WHAT and IMPACTS lines
   instruction: string;
   hazard: "snow_ice" | "wind" | "flood" | "visibility" | "storm" | "temperature" | "other";
-  relevant: boolean; // Jev: does it matter to a heavy, high-sided truck?
+  relevant: boolean; // Jev (TypeSafe AI's decision model): does it matter to a heavy, high-sided truck?
   road_closure: boolean;
   truck_risk: number;
   triage: "jev" | "rules";
