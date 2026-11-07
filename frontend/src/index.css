@@ -1,9 +1,165 @@
 @import "tailwindcss";
 @import "maplibre-gl/dist/maplibre-gl.css";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Colour roles. Blue is kept for the picked route; weather colours mean only weather. */
+:root {
+  --surface: #ffffff;
+  --ink: #15191e;
+  --ink-2: #59626e;
+  --rule: #dde1e6;
+  --tint: #f0f3f7;
+  --accent: #1f5fd1;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(31 95 209 / 0.35);
+  --map: #eef0f2;
+  --severe: #c62f2b;
+  --alt: #8a939e;
+  --risk-0: #8cc27e;
+  --risk-1: #e3a920;
+  --risk-2: #e07b39;
+  --risk-3: #c62f2b;
+  --risk-4: #4a0d1e;
+  --nt-stripe: #a7737f;
+  --shadow: 0 6px 24px rgb(0 0 0 / 0.14);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --surface: #0f1216;
+  --ink: #e6e9ed;
+  --ink-2: #9aa4b0;
+  --rule: #262c33;
+  --tint: #1b2027;
+  --accent: #5b9bff;
+  --accent-ink: #0b1220;
+  --accent-soft: rgb(91 155 255 / 0.45);
+  --map: #161a1f;
+  --severe: #e5483c;
+  --alt: #6b7682;
+  --risk-0: #4f8a47;
+  --risk-1: #e9b949;
+  --risk-2: #e8833f;
+  --risk-3: #e5483c;
+  --risk-4: #2a0710;
+  --nt-stripe: #ff6a5c;
+  --shadow: 0 6px 24px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-rule: var(--rule);
+  --color-tint: var(--tint);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-map: var(--map);
+  --color-severe: var(--severe);
+  --color-alt: var(--alt);
+  --font-sans: "Public Sans", system-ui, sans-serif;
+  --shadow-float: var(--shadow);
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.shield-text {
+  font-family: "Overpass", var(--font-sans);
+  font-weight: 800;
+}
+
+/* No Travel is hatched everywhere it appears, so it reads without colour. */
+.risk-4 {
+  background: repeating-linear-gradient(45deg, var(--risk-4) 0 3px, var(--nt-stripe) 3px 5px);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+.maplibregl-popup-content {
+  padding: 0;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.maplibregl-popup-tip {
+  display: none;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 11px;
+}
+
+/* Forecast slider: a native range input over a custom track, so keyboard and screen readers work as usual. */
+.time-range {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.time-range::-webkit-slider-runnable-track {
+  height: 20px;
+  background: transparent;
+}
+.time-range::-moz-range-track {
+  height: 20px;
+  background: transparent;
+}
+.time-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 3px solid var(--accent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+.time-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 3px solid var(--accent);
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Keep pins, shields and popups above the deck.gl canvas that draws the routes. */
+.maplibregl-marker {
+  z-index: 3;
+}
+.maplibregl-popup {
+  z-index: 4;
 }
