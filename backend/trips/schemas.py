@@ -70,6 +70,7 @@ class CheckpointOut(BaseModel):
     reason: str
     load_escalated: bool
     confidence: Confidence
+    place: str | None = Field(default=None, description="Nearest named place, from NWS; null if unknown")
 
 
 class SegmentOut(BaseModel):
@@ -157,6 +158,35 @@ class HeatmapOut(BaseModel):
     sample_snow: str
 
 
+class WarningHitOut(BaseModel):
+    route_id: str
+    from_mi: float
+    to_mi: float
+    enter: int = Field(description="When the truck first reaches the warned area")
+    tz: str
+
+
+class WarningOut(BaseModel):
+    """An official alert the truck would drive into while it is in effect."""
+
+    id: str
+    event: str
+    severity: str
+    area: str
+    starts: int
+    ends: int | None
+    summary: str = Field(description="The alert's own WHAT and IMPACTS lines")
+    instruction: str
+    hazard: Literal["snow_ice", "wind", "flood", "visibility", "storm", "temperature", "other"]
+    relevant: bool = Field(description="Jev: does this matter to a heavy, high-sided truck?")
+    road_closure: bool
+    truck_risk: float
+    triage: Literal["jev", "rules"]
+    source: Literal["nws", "simulated"]
+    url: str | None
+    routes: list[WarningHitOut]
+
+
 class TimingsOut(BaseModel):
     routing_ms: int
     weather_ms: int
@@ -182,6 +212,8 @@ class TripOut(BaseModel):
     recommendation: RecommendationOut
     departure_advice: DepartureAdviceOut
     heatmap: HeatmapOut
+    warnings: list[WarningOut] = []
+    warnings_status: Literal["ok", "unavailable"] = "ok"
     timings: TimingsOut
 
 

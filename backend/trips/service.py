@@ -15,9 +15,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import h3
+import httpx
 import numpy as np
 import shapely
 from django.core.cache import cache
@@ -33,11 +35,15 @@ from engine.rules import levels_array
 from engine.sampling import Checkpoints, place_checkpoints
 from engine.scoring import CRITERIA, Advice, Ranking, rank
 from engine.weather import WeatherGrid
+from providers import nws
+from providers.http import UpstreamError
+from providers.nws import Alert, PointInfo
 from providers.routing import LatLon, RouteCandidate, get_routing_provider
 from providers.routing.alternatives import distinct_routes
 from providers.weather.demo import DemoStormWeather
 from providers.weather.openmeteo import get_weather_provider
 from trips import schemas as s
+from trips.warnings import demo_alerts, route_warnings, sample_indices, spread
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +57,8 @@ ROUTE_CACHE_S = 30 * 60
 TRIP_CACHE_S = 24 * 3600
 MAX_LEAD_DAYS = 5
 ROUTE_LABELS = "ABCDE"
+POINTS_WAIT_S = 5.0  # counted from when the lookup starts, alongside the forecast download
+WARNINGS_WAIT_S = 8.0
 
 
 class TripError(ValueError):
@@ -88,6 +96,7 @@ class _Prepared:
     staged: list[tuple[Polyline, TripClock, Checkpoints]]
     corridor: Corridor
     checkpoint_cells: list[list[str]]
+    checkpoint_latlon: list[list[tuple[float, float]]]
     weather_cells: list[str]
 
 
@@ -95,6 +104,7 @@ def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest) -
     lines: list[Polyline] = []
     staged: list[tuple[Polyline, TripClock, Checkpoints]] = []
     cp_cells: list[list[str]] = []
+    cp_latlon: list[list[tuple[float, float]]] = []
     for c in cands:
         line = Polyline.from_coords(c.coords)
         profile = DriveProfile(line.cum_mi, c.cum_drive_s)
@@ -103,6 +113,7 @@ def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest) -
         clock = TripClock.build(depart_s, profile, hos=DEFAULT_HOS if req.hos else None)
         cps = place_checkpoints(line.length_mi, req.interval_mi)
         lats, lons = line.points_at(cps.miles)
+        cp_latlon.append([(float(a), float(b)) for a, b in zip(lats, lons, strict=True)])
         cp_cells.append(
             [h3.latlng_to_cell(float(a), float(b), CHECKPOINT_RES) for a, b in zip(lats, lons, strict=True)]
         )
@@ -114,7 +125,7 @@ def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest) -
     if n_cp + len(corridor.sample_cells) > WEATHER_POINT_BUDGET:
         corridor = build_corridor(lines, CORRIDOR_HALF_WIDTH_MI, sample_res=SAMPLE_RES - 1)
     weather_cells = sorted({c for cells in cp_cells for c in cells} | set(corridor.sample_cells))
-    return _Prepared(lines, staged, corridor, cp_cells, weather_cells)
+    return _Prepared(lines, staged, corridor, cp_cells, cp_latlon, weather_cells)
 
 
 def _segments(ev: RouteEvaluation) -> list[s.SegmentOut]:
@@ -320,6 +331,37 @@ def _compute(
     return routes, rec, dep, heat
 
 
+async def _warnings(
+    routes: list[s.RouteOut],
+    lookup: asyncio.Task[list[PointInfo | None]],
+    sampled: list[list[int]],
+    simulated: list[Alert] | None,
+) -> tuple[list[s.WarningOut], Literal["ok", "unavailable"]]:
+    """Name the places along each route and find official warnings. Never fails the trip."""
+    try:
+        infos: list[PointInfo | None] | None = await lookup
+    except httpx.HTTPError as e:
+        log.warning("nws points lookup failed: %s", type(e).__name__)
+        infos = None
+    if infos is not None and not any(infos):
+        infos = None
+    zones: dict[str, list[PointInfo | None]] = {}
+    offset = 0
+    for r, idx in zip(routes, sampled, strict=True):
+        part: list[PointInfo | None] = infos[offset : offset + len(idx)] if infos else [None] * len(idx)
+        offset += len(idx)
+        zones[r.id] = spread(part, idx, len(r.checkpoints))
+        for cp, info in zip(r.checkpoints, zones[r.id], strict=True):
+            cp.place = info.place if info else None
+    if infos is None and simulated is None:
+        return [], "unavailable"
+    try:
+        return await asyncio.wait_for(route_warnings(routes, zones, simulated), WARNINGS_WAIT_S), "ok"
+    except (TimeoutError, UpstreamError, httpx.HTTPError) as e:
+        log.warning("warnings unavailable: %s", type(e).__name__)
+        return [], "unavailable"
+
+
 async def plan_trip(req: s.TripRequest) -> s.TripOut:
     t0 = time.perf_counter()
     origin_tz = tz_at(req.origin.lat, req.origin.lon)
@@ -338,11 +380,18 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
     t_route = time.perf_counter()
 
     prep = await asyncio.to_thread(_prepare, cands, depart_s, req)
-    weather = DemoStormWeather() if req.weather == "demo_storm" else get_weather_provider()
+    # Zone and town lookups run while the forecast downloads.
+    sampled = [sample_indices(len(ll), req.interval_mi) for ll in prep.checkpoint_latlon]
+    lookup = asyncio.create_task(
+        nws.points([ll[i] for ll, idx in zip(prep.checkpoint_latlon, sampled, strict=True) for i in idx], POINTS_WAIT_S)
+    )
+    demo = DemoStormWeather() if req.weather == "demo_storm" else None
+    weather = demo or get_weather_provider()
     grid = await weather.grid(prep.weather_cells)
     t_wx = time.perf_counter()
 
     routes, rec, dep, heat = await asyncio.to_thread(_compute, req, cands, prep, grid, depart_s)
+    warnings, warnings_status = await _warnings(routes, lookup, sampled, demo_alerts(demo.anchor_s) if demo else None)
     t_end = time.perf_counter()
 
     trip = s.TripOut(
@@ -363,6 +412,8 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
         recommendation=rec,
         departure_advice=dep,
         heatmap=heat,
+        warnings=warnings,
+        warnings_status=warnings_status,
         timings=s.TimingsOut(
             routing_ms=round((t_route - t0) * 1000),
             weather_ms=round((t_wx - t_route) * 1000),

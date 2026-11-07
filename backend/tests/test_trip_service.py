@@ -7,13 +7,16 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import numpy as np
 import pytest
 from django.test import AsyncClient
 
 from engine.weather import HOUR, WeatherGrid
+from providers.nws import Alert, PointInfo
 from providers.routing.base import LatLon, RouteCandidate
 from trips import service
+from trips import warnings as trip_warnings
 from trips.schemas import PlaceIn, TripRequest
 
 DALLAS = PlaceIn(label="Dallas", lat=32.7767, lon=-96.797)
@@ -57,10 +60,21 @@ class _StormWeather:
         return WeatherGrid(times, wind, wind + 5, z + 270, z, z, issued_s=float(run))
 
 
+async def _fake_points(coords: list[tuple[float, float]], deadline_s: float) -> list[PointInfo | None]:
+    # One forecast zone per whole degree of latitude, so tests can aim alerts at a band.
+    return [PointInfo(frozenset({f"TXZ{int(lat):03d}"}), f"Town {int(lat)}, TX", "TX") for lat, _ in coords]
+
+
+async def _no_alerts(states: list[str]) -> list[Alert]:
+    return []
+
+
 @pytest.fixture
 def fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "get_routing_provider", lambda: _ThreeRoutes())
     monkeypatch.setattr(service, "get_weather_provider", lambda: _StormWeather())
+    monkeypatch.setattr(service.nws, "points", _fake_points)
+    monkeypatch.setattr(trip_warnings, "active_alerts", _no_alerts)
 
 
 def _request(**kw: object) -> TripRequest:
@@ -111,6 +125,19 @@ async def test_response_is_internally_consistent() -> None:
     assert 4 in risk  # the storm shows up as No Travel for this load
     assert len(h.sample_of) == len(h.cells) and max(h.sample_of) < h.samples
     assert len(base64.b64decode(h.sample_wind)) == h.samples * h.hours
+    assert all(c.place and c.place.startswith("Town ") for r in trip.routes for c in r.checkpoints)
+    assert trip.warnings == [] and trip.warnings_status == "ok"
+
+
+@pytest.mark.usefixtures("fakes")
+async def test_trip_survives_the_weather_service_being_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def down(coords: list[tuple[float, float]], deadline_s: float) -> list[PointInfo | None]:
+        raise httpx.ConnectError("no route to host")
+
+    monkeypatch.setattr(service.nws, "points", down)
+    trip = await service.plan_trip(_request())
+    assert trip.warnings_status == "unavailable" and trip.routes
+    assert all(c.place is None for r in trip.routes for c in r.checkpoints)
 
 
 @pytest.mark.usefixtures("fakes")
