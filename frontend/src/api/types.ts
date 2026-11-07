@@ -155,3 +155,14 @@ export interface Trip {
   warnings: Warning[];
   warnings_status: "ok" | "unavailable";
 }
+
+/** Form fields read from one typed sentence (POST /api/parse); null = not found. */
+export interface ParsedTrip {
+  origin: Place | null;
+  destination: Place | null;
+  departure_local: string | null;
+  load_lb: number | null;
+  interval_mi: 10 | 25 | 50 | null;
+  unsure: ("origin" | "destination" | "departure")[];
+  read_by: "jev" | "rules";
+}

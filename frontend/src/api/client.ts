@@ -1,4 +1,4 @@
-import type { Place, Trip, TripRequest } from "./types";
+import type { ParsedTrip, Place, Trip, TripRequest } from "./types";
 
 export class ApiError extends Error {}
 
@@ -24,3 +24,10 @@ export const getTrip = (id: string) => call<Trip>(`/trips/${encodeURIComponent(i
 
 export const searchPlaces = (q: string, signal?: AbortSignal) =>
   call<Place[]>(`/places?q=${encodeURIComponent(q)}`, { signal });
+
+export const parseTrip = (text: string) =>
+  call<ParsedTrip>("/parse", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+  });

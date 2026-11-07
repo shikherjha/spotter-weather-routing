@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
-import { searchPlaces } from "../api/client";
+import { parseTrip, searchPlaces } from "../api/client";
 import type { Place, TripRequest } from "../api/types";
 import { localInput, nextHourInput } from "../lib/time";
 
@@ -10,7 +10,11 @@ const DEMO: Pick<TripRequest, "origin" | "destination" | "load_lb"> = {
   load_lb: 42000,
 };
 
-const field = "h-11 w-full rounded-lg border border-[#C3C9D1] bg-surface px-3 text-[15px] text-ink dark:border-rule";
+const field = "h-11 w-full rounded-lg border border-[#C3C9D1] px-3 text-[15px] text-ink dark:border-rule";
+// Fields filled from the typed sentence are tinted until the driver touches them.
+const bg = (filled: boolean) => (filled ? "bg-accent/10" : "bg-surface");
+
+type FieldName = "origin" | "destination" | "departure" | "load" | "interval";
 
 export function TripForm({
   initial,
@@ -31,6 +35,59 @@ export function TripForm({
   const [hos, setHos] = useState(initial?.hos ?? true);
   const [demo, setDemo] = useState(initial?.weather === "demo_storm");
   const [problem, setProblem] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [reading, setReading] = useState(false);
+  const [filled, setFilled] = useState<Set<FieldName>>(new Set());
+  const [unsure, setUnsure] = useState<Set<FieldName>>(new Set());
+  const [readNote, setReadNote] = useState<string | null>(null);
+
+  const touched = (f: FieldName) => {
+    setFilled((s) => new Set([...s].filter((x) => x !== f)));
+    setUnsure((s) => new Set([...s].filter((x) => x !== f)));
+  };
+
+  const readTyped = async () => {
+    if (typed.trim().length < 3 || reading) return;
+    setReading(true);
+    setReadNote(null);
+    try {
+      const r = await parseTrip(typed.trim());
+      const got = new Set<FieldName>();
+      if (r.origin) {
+        setOrigin(r.origin);
+        got.add("origin");
+      }
+      if (r.destination) {
+        setDestination(r.destination);
+        got.add("destination");
+      }
+      if (r.departure_local) {
+        setDeparture(r.departure_local);
+        got.add("departure");
+      }
+      if (r.load_lb) {
+        setLoad(String(Math.round(r.load_lb)));
+        got.add("load");
+      }
+      if (r.interval_mi) {
+        setEvery(r.interval_mi);
+        got.add("interval");
+      }
+      setFilled(got);
+      setUnsure(new Set(r.unsure));
+      setReadNote(
+        got.size === 0
+          ? "Couldn't read a trip from that. Try: Dallas to Denver tomorrow at 6 am, 42k lbs."
+          : r.unsure.length
+            ? "Filled in the highlighted fields. Check the ones marked below."
+            : "Filled in the highlighted fields. Check them, then plan.",
+      );
+    } catch (e) {
+      setReadNote(e instanceof Error ? e.message : "Couldn't read that.");
+    } finally {
+      setReading(false);
+    }
+  };
 
   const loadNum = Number(load.replace(/[^\d.]/g, ""));
 
@@ -68,22 +125,95 @@ export function TripForm({
     <form onSubmit={submit} aria-label="Plan a trip" className="flex flex-col gap-4">
       <h1 className="m-0 text-[22px] leading-7 font-bold">Plan a trip</h1>
 
-      <PlaceInput label="From" value={origin} onChange={setOrigin} placeholder="City or address" />
-      <PlaceInput label="To" value={destination} onChange={setDestination} placeholder="City or address" />
+      <div className="flex flex-col gap-1.5 rounded-[10px] bg-tint p-3">
+        <label htmlFor="typed-trip" className="text-[13px] font-semibold">
+          Type the trip <span className="font-normal text-ink-2">(optional)</span>
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="typed-trip"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void readTyped();
+              }
+            }}
+            placeholder="Dallas to Denver tomorrow after lunch, 42k lbs"
+            aria-describedby="typed-note"
+            className={`${field} min-w-0 flex-1 bg-surface`}
+          />
+          <button
+            type="button"
+            onClick={() => void readTyped()}
+            disabled={reading || typed.trim().length < 3}
+            className="h-11 shrink-0 rounded-lg border border-ink bg-surface px-3.5 text-sm font-semibold disabled:opacity-50"
+          >
+            {reading ? "Reading…" : "Fill in"}
+          </button>
+        </div>
+        <span id="typed-note" aria-live="polite" className="text-xs leading-[17px] text-ink-2">
+          {readNote ?? "We fill in the fields below for you to check."}
+        </span>
+      </div>
+
+      <PlaceInput
+        label="From"
+        value={origin}
+        onChange={(p) => {
+          setOrigin(p);
+          touched("origin");
+        }}
+        placeholder="City or address"
+        tinted={filled.has("origin")}
+        check={unsure.has("origin") ? "We couldn't find this place. Pick it from the suggestions." : null}
+      />
+      <PlaceInput
+        label="To"
+        value={destination}
+        onChange={(p) => {
+          setDestination(p);
+          touched("destination");
+        }}
+        placeholder="City or address"
+        tinted={filled.has("destination")}
+        check={unsure.has("destination") ? "We couldn't find this place. Pick it from the suggestions." : null}
+      />
 
       <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-2.5">
         <label className="flex flex-col gap-1">
           <span className="text-[13px] font-semibold">Leave</span>
-          <input type="datetime-local" required value={departure} onChange={(e) => setDeparture(e.target.value)} className={`num ${field} px-2`} />
+          <input
+            type="datetime-local"
+            required
+            value={departure}
+            onChange={(e) => {
+              setDeparture(e.target.value);
+              touched("departure");
+            }}
+            className={`num ${field} px-2 ${bg(filled.has("departure"))}`}
+          />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[13px] font-semibold">Load weight</span>
           <span className="relative">
-            <input inputMode="numeric" value={load} onChange={(e) => setLoad(e.target.value)} className={`num ${field} pr-9`} />
+            <input
+              inputMode="numeric"
+              value={load}
+              onChange={(e) => {
+                setLoad(e.target.value);
+                touched("load");
+              }}
+              className={`num ${field} pr-9 ${bg(filled.has("load"))}`}
+            />
             <span className="absolute top-3 right-3 text-sm text-ink-2">lb</span>
           </span>
         </label>
       </div>
+      {unsure.has("departure") && (
+        <p className="-mt-2 mb-0 text-xs leading-[17px] font-semibold text-severe">Check the leave time: we weren't sure what you meant.</p>
+      )}
       <p className="-mt-2 mb-0 text-xs leading-[17px] text-ink-2">
         Leave time is local time where you start. Loads over 30,000 lb hit wind limits sooner.
       </p>
@@ -96,7 +226,10 @@ export function TripForm({
               key={n}
               type="button"
               aria-pressed={interval === n}
-              onClick={() => setEvery(n)}
+              onClick={() => {
+                setEvery(n);
+                touched("interval");
+              }}
               className={`num h-10 rounded-[7px] text-sm ${interval === n ? "bg-surface font-bold shadow-sm" : ""}`}
             >
               {n} mi
@@ -140,11 +273,15 @@ function PlaceInput({
   value,
   onChange,
   placeholder,
+  tinted = false,
+  check = null,
 }: {
   label: string;
   value: Place | null;
   onChange: (p: Place | null) => void;
   placeholder: string;
+  tinted?: boolean;
+  check?: string | null;
 }) {
   const id = useId();
   const [text, setText] = useState(value?.label ?? "");
@@ -216,8 +353,9 @@ function PlaceInput({
           else return;
           e.preventDefault();
         }}
-        className={field}
+        className={`${field} ${bg(tinted)}`}
       />
+      {check && <span className="text-xs font-semibold text-severe">{check}</span>}
       {open && options.length > 0 && (
         <ul id={`${id}-list`} role="listbox" className="absolute top-full z-20 m-0 mt-1 w-full list-none overflow-hidden rounded-lg border border-rule bg-surface p-1 shadow-float">
           {options.map((p, i) => (
