@@ -13,6 +13,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.staticfiles",
     "corsheaders",
+    "ninja",  # serves the interactive API docs at /api/docs
     "api",
 ]
 
@@ -45,7 +46,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 USE_TZ = True
 TIME_ZONE = "UTC"
 
-TEMPLATES: list[dict[str, object]] = []
+TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "APP_DIRS": True}]
 
 LOGGING = {
     "version": 1,
