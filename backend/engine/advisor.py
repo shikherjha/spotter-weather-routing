@@ -2,6 +2,10 @@
 
 Uses the forecast already fetched for the checkpoints, so it costs zero API calls.
 Assumes route geometry and moving times don't depend on departure hour (no traffic model).
+
+Choosing *when* to leave differs from choosing a route in one way: waiting is not free.
+Risk criteria are compared exactly as in `rank`, but the final tie-break is arrival time
+(wait + trip), so "leave 13 h later to save 30 min on the road" can never win.
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ from dataclasses import dataclass
 
 from engine.evaluate import RoutePlan, evaluate
 from engine.rules import WindBasis
-from engine.scoring import Advice, RouteScore, rank, rank_key
+from engine.scoring import CRITERIA, Advice, RouteScore, rank
 from engine.weather import HOUR, WeatherGrid
 
 
@@ -25,7 +29,13 @@ class DepartureOption:
 @dataclass(frozen=True)
 class DepartureAdvice:
     options: list[DepartureOption]
-    best_offset_h: int  # earliest departure whose best route ranks highest
+    best_offset_h: int  # safest departure; ties go to the earliest arrival
+
+
+def _departure_key(o: DepartureOption) -> tuple[int, ...]:
+    risk = tuple(c.bucket(o.best) for c in CRITERIA if c.key != "duration_s")
+    arrival_min = round((o.offset_h * HOUR + o.best.duration_s) / 60)
+    return (*risk, arrival_min, o.offset_h)
 
 
 def sweep_departures(
@@ -42,5 +52,5 @@ def sweep_departures(
         options.append(DepartureOption(h, r.recommended, r.advice))
     # Unknown (beyond-horizon) miles make a departure ineligible to be "best".
     eligible = [o for o in options if o.best.unknown_mi == 0] or options
-    best = min(eligible, key=lambda o: (rank_key(o.best), o.offset_h))
+    best = min(eligible, key=_departure_key)
     return DepartureAdvice(options, best.offset_h)

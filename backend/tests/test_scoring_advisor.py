@@ -98,12 +98,19 @@ def test_heavy_truck_avoids_storm_route() -> None:
     assert north.no_travel_mi > 0  # 45-54 mph and > 30,000 lb
 
 
-def test_advisor_finds_later_departure_after_the_storm() -> None:
+def test_advisor_waits_only_when_waiting_buys_safety() -> None:
     plans, grid = _storm_world()
-    advice = sweep_departures(plans, grid, load_lb=35_000, hours=range(0, 12))
-    assert advice.options[0].best.route_id == "south"
-    assert advice.best_offset_h >= 6  # storm has passed: fast north route is clean
-    assert advice.options[advice.best_offset_h].best.route_id == "north"
+    # Leaving now, 'south' is clean: no reason to wait even though 'north' is faster later.
+    assert sweep_departures(plans, grid, load_lb=35_000, hours=range(0, 12)).best_offset_h == 0
+
+    # Storm over both routes for the first 6 h: the earliest clean departure wins, on the faster route.
+    both = grid.wind_mph.copy()
+    both[:, :6] = 50.0
+    stormy = WeatherGrid(grid.times, both, both + 5, grid.wind_dir_deg, grid.rain_in_hr, grid.snow_in_hr, 0.0)
+    advice = sweep_departures(plans, stormy, load_lb=35_000, hours=range(0, 12))
+    assert advice.options[0].advice is Advice.DELAY
+    assert advice.best_offset_h == 6
+    assert advice.options[6].best.route_id == "north"
 
 
 def test_checkpoint_results_carry_eta_and_reason() -> None:
@@ -137,3 +144,25 @@ def test_route_signature_overlap() -> None:
     assert shared_fraction(sa, sa) == 1.0
     assert shared_fraction(sb, sa) > 0.9  # b is a sub-path of a
     assert shared_fraction(route_signature(far), sa) == 0.0
+
+
+def test_advisor_never_waits_just_to_shorten_the_drive() -> None:
+    """Both departures are risk-free; the later one has a faster route but arrives later."""
+    plans, grid = _storm_world()
+    calm = WeatherGrid(
+        grid.times,
+        grid.wind_mph * 0 + 5,
+        grid.gust_mph * 0 + 8,
+        grid.wind_dir_deg,
+        grid.rain_in_hr,
+        grid.snow_in_hr,
+        grid.issued_s,
+    )
+    advice = sweep_departures(plans, calm, load_lb=35_000, hours=range(0, 12))
+    assert advice.best_offset_h == 0
+
+
+def test_httpx_does_not_log_urls_with_keys() -> None:
+    import logging
+
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
