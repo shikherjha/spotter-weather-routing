@@ -338,7 +338,7 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
     t_route = time.perf_counter()
 
     prep = await asyncio.to_thread(_prepare, cands, depart_s, req)
-    weather = DemoStormWeather(depart_s) if req.weather == "demo_storm" else get_weather_provider()
+    weather = DemoStormWeather() if req.weather == "demo_storm" else get_weather_provider()
     grid = await weather.grid(prep.weather_cells)
     t_wx = time.perf_counter()
 

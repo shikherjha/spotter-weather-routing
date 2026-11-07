@@ -1,6 +1,7 @@
 """A simulated storm for demos: the forecast is calm almost every day, which hides most of the product.
 
-Three weather systems, timed relative to the trip's departure so they always meet the truck:
+Three weather systems, timed from the next whole hour (when the demo trip leaves), so a trip
+re-planned for a later departure sees the same storm and can actually avoid it:
   * a wind storm on I-70 in western Kansas, drifting east (+6 h .. +22 h)
   * a snow band on I-25 over Raton Pass (+8 h .. +21 h)
   * a rain line on I-35 in Oklahoma, drifting north (-2 h .. +7 h)
@@ -40,15 +41,16 @@ def _window(t: np.ndarray, on: float, off: float, ramp_h: float = 3.0) -> np.nda
 class DemoStormWeather:
     model = "demo-storm"
 
-    def __init__(self, departure_s: float) -> None:
-        self.departure_s = departure_s
+    def __init__(self, now_s: float | None = None) -> None:
+        now = time.time() if now_s is None else now_s
+        self.anchor_s = (now // HOUR + 1) * HOUR
 
     async def grid(self, cells: Sequence[str]) -> WeatherGrid:
-        run = time.time() // HOUR * HOUR - 2 * HOUR
+        run = self.anchor_s - 3 * HOUR
         times = run + HOUR * np.arange(HORIZON_H, dtype=float)
         ll = np.array([h3.cell_to_latlng(c) for c in cells]).reshape(-1, 2)
         lat, lon = ll[:, :1], ll[:, 1:2]
-        th = (times[None, :] - self.departure_s) / HOUR
+        th = (times[None, :] - self.anchor_s) / HOUR
 
         wind_core = _blob(lat, lon, 38.9, -101.6 + 0.08 * (th - 6), 0.85, 1.6) * _window(th, 6, 22)
         wind = 9 + 3 * np.sin(th / 5) + 43 * wind_core
