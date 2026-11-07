@@ -1,16 +1,6 @@
-# Local backing services. The apps themselves run natively (make dev) for fast reloads.
+# Local Redis for the trip and forecast cache. The apps run natively (make backend / make frontend) for fast reloads.
 services:
   redis:
     image: redis:7.4-alpine
     ports: ["6379:6379"]
     command: ["redis-server", "--save", "", "--appendonly", "no"]
-  postgres:
-    image: postgres:17-alpine
-    ports: ["5432:5432"]
-    environment:
-      POSTGRES_USER: spotter
-      POSTGRES_PASSWORD: spotter
-      POSTGRES_DB: spotter
-    volumes: ["pgdata:/var/lib/postgresql/data"]
-volumes:
-  pgdata:

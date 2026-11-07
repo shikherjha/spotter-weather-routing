@@ -21,10 +21,11 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# OS / editors
+# OS / editors / local tooling
 .DS_Store
 .idea/
 .vscode/
+.claude/
 
 # Brief (not ours to publish)
 reference/

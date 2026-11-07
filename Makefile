@@ -4,7 +4,7 @@ setup:  ## install all dependencies
 	cd backend && uv sync
 	cd frontend && npm ci
 
-services:  ## start Redis + Postgres in Docker
+services:  ## start Redis in Docker
 	docker compose up -d
 
 backend:  ## API on :8000 (ASGI, autoreload)
@@ -22,7 +22,7 @@ lint:
 	cd frontend && npm run lint
 
 typecheck:
-	cd backend && uv run mypy engine config api
+	cd backend && uv run mypy .
 	cd frontend && npx tsc -b
 
 check: lint typecheck test  ## everything CI runs
