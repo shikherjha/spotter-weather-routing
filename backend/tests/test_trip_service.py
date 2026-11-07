@@ -12,12 +12,13 @@ import numpy as np
 import pytest
 from django.test import AsyncClient
 
-from engine.weather import HOUR, WeatherGrid
+from engine.units import HOUR
+from engine.weather import WeatherGrid
 from providers.nws import Alert, PointInfo
 from providers.routing.base import LatLon, RouteCandidate
 from trips import service
 from trips import warnings as trip_warnings
-from trips.schemas import PlaceIn, TripRequest
+from trips.schemas import PlaceIn, TripOut, TripRequest
 
 DALLAS = PlaceIn(label="Dallas", lat=32.7767, lon=-96.797)
 DENVER = PlaceIn(label="Denver", lat=39.7392, lon=-104.9903)
@@ -123,10 +124,31 @@ async def test_response_is_internally_consistent() -> None:
     risk = np.frombuffer(base64.b64decode(h.risk), dtype=np.uint8)
     assert risk.size == len(h.cells) * h.hours and set(np.unique(risk)) <= {0, 1, 2, 3, 4, 255}
     assert 4 in risk  # the storm shows up as No Travel for this load
-    assert len(h.sample_of) == len(h.cells) and max(h.sample_of) < h.samples
-    assert len(base64.b64decode(h.sample_wind)) == h.samples * h.hours
+    assert h.resolution == 6
     assert all(c.place and c.place.startswith("Town ") for r in trip.routes for c in r.checkpoints)
     assert trip.warnings == [] and trip.warnings_status == "ok"
+
+
+@pytest.mark.usefixtures("fakes")
+async def test_a_broken_warnings_feed_never_fails_the_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken(states: list[str]) -> list[Alert]:
+        raise ValueError("unexpected NWS payload")
+
+    monkeypatch.setattr(trip_warnings, "active_alerts", broken)
+    trip = await service.plan_trip(_request())
+    assert trip.warnings_status == "unavailable" and len(trip.routes) == 3
+
+
+@pytest.mark.usefixtures("fakes")
+async def test_heatmap_uses_the_chosen_wind_reading() -> None:
+    def peak(trip: TripOut) -> int:
+        risk = np.frombuffer(base64.b64decode(trip.heatmap.risk), dtype=np.uint8)
+        return int(risk[risk != 255].max())
+
+    light = 25_000  # below the load rules, so only the wind bands matter
+    sustained = await service.plan_trip(_request(load_lb=light))  # storm: 50 mph sustained, 55 gusts
+    gusts = await service.plan_trip(_request(load_lb=light, wind_basis="gust"))
+    assert (peak(sustained), peak(gusts)) == (3, 4)
 
 
 @pytest.mark.usefixtures("fakes")

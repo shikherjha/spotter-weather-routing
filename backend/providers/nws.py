@@ -19,16 +19,17 @@ from datetime import datetime
 from typing import Any
 
 import h3
-import httpx
 import shapely
+import shapely.errors
 from django.core.cache import cache
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
-from providers.http import UpstreamError, client, retrying
+from providers.http import UpstreamError, fetch, json_or_error
 
 log = logging.getLogger(__name__)
 
+PROVIDER = "National Weather Service"
 BASE = "https://api.weather.gov"
 HEADERS = {"Accept": "application/geo+json"}
 POINT_RES = 7
@@ -68,13 +69,9 @@ def _ugc(url: str | None) -> str | None:
 
 
 async def _get(path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
-    async for attempt in retrying(2):
-        with attempt:
-            r = await client().get(f"{BASE}{path}", params=params, headers=HEADERS)
-            r.raise_for_status()
-            data: dict[str, Any] = r.json()
-            return data
-    raise AssertionError("unreachable")
+    resp = await fetch(PROVIDER, "GET", f"{BASE}{path}", attempts=2, params=params, headers=HEADERS)
+    data: dict[str, Any] = json_or_error(PROVIDER, resp)
+    return data
 
 
 async def _point(lat: float, lon: float, gate: asyncio.Semaphore) -> PointInfo | None:
@@ -84,7 +81,7 @@ async def _point(lat: float, lon: float, gate: asyncio.Semaphore) -> PointInfo |
     async with gate:
         try:
             p = (await _get(f"/points/{lat:.4f},{lon:.4f}"))["properties"]
-        except (httpx.HTTPError, KeyError, ValueError) as e:
+        except (UpstreamError, KeyError, TypeError) as e:
             log.info("nws point %.3f,%.3f failed: %s", lat, lon, type(e).__name__)
             await cache.aset(key, MISS, timeout=MISS_TTL_S)  # don't make every trip wait on a bad point
             return None
@@ -162,10 +159,13 @@ async def active_alerts(states: Sequence[str]) -> list[Alert]:
     key = f"nws:alerts:v1:{area}"
     if (hit := await cache.aget(key)) is not None:
         return list(hit)
-    try:
-        data = await _get("/alerts/active", {"area": area, "status": "actual"})
-    except httpx.HTTPError as e:
-        raise UpstreamError("National Weather Service", "alerts unavailable") from e
-    alerts = [a for f in data.get("features", []) if (a := parse_alert(f)) is not None]
+    data = await _get("/alerts/active", {"area": area, "status": "actual"})
+    alerts = []
+    for feature in data.get("features", []):
+        try:
+            if (alert := parse_alert(feature)) is not None:
+                alerts.append(alert)
+        except (KeyError, TypeError, ValueError, shapely.errors.ShapelyError) as e:  # one malformed alert
+            log.warning("skipping an NWS alert that didn't parse: %s", type(e).__name__)
     await cache.aset(key, alerts, timeout=ALERTS_TTL_S)
     return alerts

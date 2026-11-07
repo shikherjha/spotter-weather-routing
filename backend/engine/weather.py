@@ -15,10 +15,9 @@ from enum import StrEnum
 import numpy as np
 from numpy.typing import NDArray
 
-from engine.geometry import FloatArray
 from engine.rules import Conditions
+from engine.units import HOUR, FloatArray
 
-HOUR = 3600.0
 IntArray = NDArray[np.intp]
 BoolArray = NDArray[np.bool_]
 

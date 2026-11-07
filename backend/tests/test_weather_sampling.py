@@ -4,7 +4,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from engine.sampling import place_checkpoints
-from engine.weather import HOUR, Confidence, WeatherGrid, confidence, sample
+from engine.units import HOUR
+from engine.weather import Confidence, WeatherGrid, confidence, sample
 
 
 def _grid() -> WeatherGrid:

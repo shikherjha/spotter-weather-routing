@@ -5,9 +5,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from providers.jev import Departure
 from providers.places import Place
 from trips import parse
+from trips.parse import Departure
 
 CST = ZoneInfo("America/Chicago")
 NOW = datetime(2026, 11, 7, 15, 20, tzinfo=CST)  # Saturday afternoon

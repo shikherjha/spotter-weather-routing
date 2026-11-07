@@ -14,11 +14,11 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point
 
-from providers.jev import Triage, triage
 from providers.nws import Alert, PointInfo, active_alerts
 from trips import schemas as s
+from trips.triage import Triage, triage
 
 SAMPLE_EVERY_MI = 20.0
 SEVERITY_RANK = {"Extreme": 0, "Severe": 1, "Moderate": 2, "Minor": 3}
@@ -138,77 +138,3 @@ async def route_warnings(
     verdicts = await triage([a for a, _ in matched])
     out = [_warning(a, h, verdicts[a.id], source) for a, h in matched]
     return sorted(out, key=lambda w: (not w.relevant, not w.road_closure, SEVERITY_RANK.get(w.severity, 4), w.starts))
-
-
-# --- demo: warnings the NWS would plausibly issue for the simulated storm (providers/weather/demo.py)
-
-
-def _ellipse(lat: float, lon: float, rlat: float, rlon: float) -> Polygon:
-    return Polygon(
-        [(lon + rlon * math.cos(t), lat + rlat * math.sin(t)) for t in (i * math.pi / 18 for i in range(36))]
-    )
-
-
-def demo_alerts(anchor_s: float) -> list[Alert]:
-    h = 3600
-    return [
-        Alert(
-            id=f"demo-winter-storm-{int(anchor_s)}",
-            event="Winter Storm Warning",
-            severity="Severe",
-            headline="Winter Storm Warning (simulated)",
-            nws_headline="",
-            description=(
-                "* WHAT...Heavy snow expected. Total snow accumulations of 6 to 10 inches, with up to\n"
-                "14 inches over Raton Pass. Snowfall rates of 2 to 3 inches per hour at times.\n\n"
-                "* WHERE...Raton Pass, Trinidad and the I-25 corridor.\n\n"
-                "* WHEN...Through tonight.\n\n"
-                "* IMPACTS...Travel could be very difficult to impossible. Roads, including\n"
-                "Interstate 25 over Raton Pass, may close."
-            ),
-            instruction="If you must travel, keep an extra flashlight, food and water in your vehicle.",
-            area="Raton Pass; Trinidad; Southern Colfax County",
-            starts=anchor_s + 7 * h,
-            ends=anchor_s + 22 * h,
-            ugc=frozenset(),
-            polygon=_ellipse(37.05, -104.5, 0.55, 0.5),
-        ),
-        Alert(
-            id=f"demo-high-wind-{int(anchor_s)}",
-            event="High Wind Warning",
-            severity="Severe",
-            headline="High Wind Warning (simulated)",
-            nws_headline="",
-            description=(
-                "* WHAT...West winds 40 to 50 mph with gusts up to 65 mph.\n\n"
-                "* WHERE...Northwest Kansas along Interstate 70.\n\n"
-                "* WHEN...From this evening through Sunday morning.\n\n"
-                "* IMPACTS...Travel will be difficult, especially for high profile vehicles. "
-                "Blowing dust may reduce visibility."
-            ),
-            instruction="Drivers of high profile vehicles should consider delaying travel.",
-            area="Sherman; Thomas; Logan; Gove; Trego",
-            starts=anchor_s + 5 * h,
-            ends=anchor_s + 23 * h,
-            ugc=frozenset(),
-            polygon=_ellipse(39.0, -101.0, 0.6, 1.8),
-        ),
-        Alert(
-            id=f"demo-frost-{int(anchor_s)}",
-            event="Frost Advisory",
-            severity="Minor",
-            headline="Frost Advisory (simulated)",
-            nws_headline="",
-            description=(
-                "* WHAT...Temperatures as low as 33 will result in frost formation.\n\n"
-                "* WHERE...The Texas Panhandle.\n\n"
-                "* IMPACTS...Frost could harm sensitive outdoor vegetation."
-            ),
-            instruction="Take steps now to protect tender plants from the cold.",
-            area="Potter; Randall; Oldham; Deaf Smith",
-            starts=anchor_s,
-            ends=anchor_s + 20 * h,
-            ugc=frozenset(),
-            polygon=_ellipse(35.2, -101.9, 0.7, 1.0),
-        ),
-    ]

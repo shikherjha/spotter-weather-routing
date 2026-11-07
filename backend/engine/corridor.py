@@ -20,7 +20,8 @@ from pyproj import Transformer
 from shapely.geometry import LineString
 from shapely.ops import unary_union
 
-from engine.geometry import METERS_PER_MILE, FloatArray, Polyline
+from engine.geometry import METERS_PER_MILE, Polyline
+from engine.units import FloatArray
 from engine.weather import IntArray
 
 RENDER_RES = 6

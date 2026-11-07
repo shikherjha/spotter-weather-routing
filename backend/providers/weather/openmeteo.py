@@ -5,8 +5,8 @@ Design notes:
     cached cells share one time axis and can be stacked without resampling.
   * Cache key = (model, model-run init time, cell): entries go stale exactly when a
     newer forecast exists, not on an arbitrary TTL.
-  * Up to 1000 locations per POST (GET hits URL-length limits); batches run concurrently. Each location counts
-    as one call against the free tier (600/min), so caching matters.
+  * Locations go in POST batches of CHUNK (GET hits URL-length limits), fetched concurrently. Each
+    location counts against the free tier's quota, so caching matters.
   * Cells the primary model doesn't cover (NBM is CONUS-only) are refetched from GFS.
 """
 
@@ -19,12 +19,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 import h3
+import httpx
 import numpy as np
 from django.core.cache import cache
 
 from config.env import get_env
+from engine.units import HOUR
 from engine.weather import WeatherGrid
-from providers.http import UpstreamError, client, retrying
+from providers.http import UpstreamError, fetch, json_or_error
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +46,8 @@ HORIZON_H = 168
 CHUNK = 500
 FALLBACK_MODEL = "gfs_seamless"
 CACHE_TTL_S = 3 * 3600
-_HOUR = 3600
+META_TTL_S = 300
+COVERAGE_CHECK_H = 72  # a cell with no data in the first 3 days is outside the model's area
 
 
 def _iso_hour(ts: int) -> str:
@@ -89,18 +92,17 @@ class OpenMeteoWeather:
         if (cached := await cache.aget(key)) is not None:
             return int(cached)
         try:
-            resp = await client().get(self._meta_url)
-            resp.raise_for_status()
-            run = int(resp.json()["last_run_initialisation_time"])
-        except Exception as exc:  # meta is an optimisation; fall back to the current hour
-            log.warning("open-meteo meta unavailable (%s); using current hour", exc)
-            run = int(datetime.now(UTC).timestamp()) // _HOUR * _HOUR
-        await cache.aset(key, run, timeout=300)
+            meta = json_or_error(self.name, await fetch(self.name, "GET", self._meta_url, attempts=1))
+            run = int(meta["last_run_initialisation_time"])
+        except (UpstreamError, KeyError, TypeError, ValueError) as exc:  # only an optimisation: use the current hour
+            log.warning("open-meteo meta unavailable (%s); using current hour", type(exc).__name__)
+            run = int(datetime.now(UTC).timestamp() // HOUR * HOUR)
+        await cache.aset(key, run, timeout=META_TTL_S)
         return run
 
     async def grid(self, cells: Sequence[str]) -> WeatherGrid:
         run = await self.run_init_s()
-        times = run + _HOUR * np.arange(HORIZON_H + 1, dtype=np.float64)
+        times = run + HOUR * np.arange(HORIZON_H + 1, dtype=np.float64)
         keys = {c: f"wx:v1:{self.model}:{run}:{c}" for c in cells}
         cached: dict[str, np.ndarray] = await cache.aget_many(list(keys.values()))
         by_cell = {c: cached[k] for c, k in keys.items() if k in cached}
@@ -108,7 +110,7 @@ class OpenMeteoWeather:
         missing = [c for c in cells if c not in by_cell]
         if missing:
             fetched = await self._fetch(missing, run, self.model)
-            uncovered = [c for c, a in fetched.items() if np.isnan(a[0, :72]).all()]
+            uncovered = [c for c, a in fetched.items() if np.isnan(a[0, :COVERAGE_CHECK_H]).all()]
             if uncovered and self.model != FALLBACK_MODEL:
                 fetched.update(await self._fetch(uncovered, run, FALLBACK_MODEL))
             by_cell.update(fetched)
@@ -146,27 +148,34 @@ class OpenMeteoWeather:
             "timeformat": "unixtime",
             "timezone": "GMT",
             "start_hour": _iso_hour(run),
-            "end_hour": _iso_hour(run + HORIZON_H * _HOUR),
+            "end_hour": _iso_hour(int(run + HORIZON_H * HOUR)),
         }
         if self._key:
             data["apikey"] = self._key
-        async for attempt in retrying():
-            with attempt:
-                resp = await client().post(self._url, data=data)
-                if resp.status_code == 400:
-                    raise UpstreamError(self.name, resp.json().get("reason", resp.text[:200]), 400)
-                resp.raise_for_status()
-        body = resp.json()
+        resp = await fetch(self.name, "POST", self._url, data=data)
+        if not resp.is_success:
+            raise UpstreamError(self.name, _reason(resp) or f"HTTP {resp.status_code}", resp.status_code)
+        body = json_or_error(self.name, resp)
         locations = body if isinstance(body, list) else [body]
         if len(locations) != len(chunk):
             raise UpstreamError(self.name, f"expected {len(chunk)} locations, got {len(locations)}")
         out: dict[str, np.ndarray] = {}
         for cell, loc in zip(chunk, locations, strict=True):
+            first = (loc.get("hourly") or {}).get("time", [None])[0]
+            if first != run:  # every cached cell must share one time axis
+                raise UpstreamError(self.name, f"forecast starts at {first}, expected {run}")
             arr = _parse_location(loc)
             if arr.shape[1] != HORIZON_H + 1:
                 raise UpstreamError(self.name, f"unexpected hour count {arr.shape[1]}")
             out[cell] = arr
         return out
+
+
+def _reason(resp: httpx.Response) -> str:
+    try:
+        return str(resp.json().get("reason", ""))
+    except ValueError:
+        return ""
 
 
 def get_weather_provider() -> OpenMeteoWeather:

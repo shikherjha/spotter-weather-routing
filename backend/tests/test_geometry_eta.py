@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
 
-from engine.eta import HOUR, DriveProfile, HosRules, StopKind, TripClock, plan_stops
+from engine.eta import DriveProfile, HosRules, StopKind, TripClock, plan_stops
 from engine.geometry import Polyline, crosswind_mph, haversine_mi
+from engine.units import HOUR
 
 
 def test_one_degree_of_latitude_is_about_69_miles() -> None:

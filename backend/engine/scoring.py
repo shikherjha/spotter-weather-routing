@@ -3,6 +3,8 @@
 Order of preference:
   0. fewest No Travel miles   (hard gate: the brief ranks only Severe/High, but a route
                                containing No Travel must never beat one without)
+  0b. fewest miles beyond the forecast (only differs for departures days out: a route
+                               must not win because its weather can't be seen yet)
   1. fewest Severe miles
   2. fewest High miles
   3. lowest distance-weighted average risk
@@ -20,8 +22,8 @@ from enum import StrEnum
 
 import numpy as np
 
-from engine.geometry import FloatArray
 from engine.rules import Risk
+from engine.units import FloatArray
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,7 @@ class Criterion:
 
 CRITERIA: tuple[Criterion, ...] = (
     Criterion("no_travel_mi", "No Travel miles", lambda s: s.no_travel_mi, 0.1, "mi"),
+    Criterion("unknown_mi", "miles beyond the forecast", lambda s: s.unknown_mi, 1.0, "mi"),
     Criterion("severe_mi", "Severe miles", lambda s: s.severe_mi, 0.1, "mi"),
     Criterion("high_mi", "High miles", lambda s: s.high_mi, 0.1, "mi"),
     Criterion("avg_risk", "average risk", lambda s: s.avg_risk, 0.01, ""),

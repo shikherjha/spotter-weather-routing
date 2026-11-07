@@ -7,10 +7,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from engine.eta import TripClock
-from engine.geometry import FloatArray, Polyline, crosswind_mph
+from engine.geometry import Polyline, crosswind_mph
 from engine.rules import Assessment, Conditions, Risk, WindBasis, classify
 from engine.sampling import Checkpoints
 from engine.scoring import RouteScore, score_route
+from engine.units import FloatArray
 from engine.weather import Confidence, IntArray, WeatherGrid, confidence, sample
 
 

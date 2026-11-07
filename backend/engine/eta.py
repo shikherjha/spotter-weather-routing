@@ -15,9 +15,8 @@ from enum import StrEnum
 
 import numpy as np
 
-from engine.geometry import FloatArray
+from engine.units import HOUR, FloatArray
 
-HOUR = 3600.0
 _EPS = 1e-6
 
 

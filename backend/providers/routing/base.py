@@ -7,7 +7,8 @@ from typing import Protocol
 
 import numpy as np
 
-from engine.geometry import FloatArray, cumulative_miles
+from engine.geometry import cumulative_miles
+from engine.units import FloatArray
 
 
 @dataclass(frozen=True)

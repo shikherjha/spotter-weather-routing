@@ -4,15 +4,12 @@ version = "0.1.0"
 description = "Weather-aware truck routing API"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=2.6.0",
-    "dj-database-url>=3.1.2",
     "django>=5.2",
     "django-cors-headers>=4.9.0",
     "django-ninja>=1.7.3",
     "h3>=4.5.0",
     "httpx>=0.28.1",
     "numpy>=2.5.4",
-    "polyline>=2.0.4",
     "pydantic>=2.14.3",
     "pydantic-settings>=2.16.2",
     "pyproj>=3.8.0",

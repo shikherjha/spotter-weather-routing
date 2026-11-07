@@ -15,7 +15,7 @@ from enum import IntEnum, StrEnum
 import numpy as np
 from numpy.typing import NDArray
 
-FloatArray = NDArray[np.float64]
+from engine.units import FloatArray
 
 # Inputs are rounded before comparison so float noise (0.24999999) can't flip a band.
 _PRECISION = 4

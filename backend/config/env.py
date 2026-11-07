@@ -16,21 +16,17 @@ class AppEnv(BaseSettings):
     django_secret_key: SecretStr = SecretStr("insecure-dev-key")
     django_debug: bool = False
     django_allowed_hosts: str = "localhost,127.0.0.1"
-    database_url: str = f"sqlite:///{REPO_ROOT / 'backend' / 'db.sqlite3'}"
     redis_url: str | None = None
     cors_allowed_origins: str = "http://localhost:5173"
 
-    routing_provider: Literal["tomtom", "here", "osrm"] = "osrm"
+    routing_provider: Literal["tomtom", "osrm"] = "osrm"
     tomtom_api_key: SecretStr | None = None
-    here_api_key: SecretStr | None = None
 
     open_meteo_api_key: SecretStr | None = None
     weather_model: str = "ncep_nbm_conus"
 
     typesafe_api_key: SecretStr | None = None
     typesafe_model: str = "jev-1.14.0"
-    anthropic_api_key: SecretStr | None = None
-    anthropic_model: str = "claude-sonnet-5-5"
 
     http_timeout_s: float = Field(default=15.0, gt=0)
 

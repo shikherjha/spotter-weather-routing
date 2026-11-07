@@ -32,7 +32,7 @@ def _upstream_error(request: HttpRequest, exc: UpstreamError) -> HttpResponse:
     log.warning("upstream failure: %s", exc)
     status = 503 if exc.status == 429 else 502
     detail = (
-        "Weather provider rate limit reached; try again in a minute."
+        f"{exc.provider} is busy right now; try again in a minute."
         if exc.status == 429
         else f"{exc.provider} is unavailable right now."
     )

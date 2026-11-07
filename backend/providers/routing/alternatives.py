@@ -16,7 +16,8 @@ import numpy as np
 from pyproj import Geod
 
 from engine.corridor import route_signature, shared_fraction
-from engine.geometry import METERS_PER_MILE, Polyline, initial_bearing_deg
+from engine.geometry import METERS_PER_MILE, Polyline, haversine_mi, initial_bearing_deg
+from providers.http import UpstreamError
 from providers.routing.base import LatLon, RouteCandidate, RoutingProvider
 
 log = logging.getLogger(__name__)
@@ -24,6 +25,9 @@ _GEOD = Geod(ellps="WGS84")
 
 MAX_SHARED = 0.80  # reject a candidate that reuses >80% of an accepted route's road
 MAX_STRETCH = 1.5  # reject a candidate >1.5x the fastest route's moving time
+VIA_OFFSET_SHARE = 0.15  # via points sit this share of the trip's straight-line length off the axis...
+VIA_OFFSET_MIN_MI = 20.0  # ...but at least this far, so short trips still get a real alternative
+VIA_OFFSET_MAX_MI = 120.0
 
 
 def _accept(cands: Sequence[RouteCandidate], accepted: list[RouteCandidate], want: int) -> None:
@@ -49,8 +53,9 @@ def via_points(best: RouteCandidate, origin: LatLon, dest: LatLon) -> list[LatLo
             0
         ]
     )
-    straight_mi = line.length_mi * 0.85
-    base = min(max(0.15 * straight_mi, 20.0), 120.0)
+    a, b = np.array([origin.lat, origin.lon]), np.array([dest.lat, dest.lon])
+    straight_mi = float(haversine_mi(a[:1], a[1:], b[:1], b[1:])[0])
+    base = min(max(VIA_OFFSET_SHARE * straight_mi, VIA_OFFSET_MIN_MI), VIA_OFFSET_MAX_MI)
     out = []
     for scale in (1.0, 2.0):
         for side in (90.0, -90.0):
@@ -71,15 +76,23 @@ async def distinct_routes(
         return accepted
 
     vias = via_points(accepted[0], origin, dest)
-    results = await asyncio.gather(
-        *(provider.routes([origin, v, dest], depart_at, load_lb, alternatives=0) for v in vias),
-        return_exceptions=True,
-    )
+    requests = [provider.routes([origin, v, dest], depart_at, load_lb, alternatives=0) for v in vias]
+    if provider.name == "osrm":  # the public OSRM server allows about one request a second, so go in turn
+        results: list[list[RouteCandidate] | BaseException] = []
+        for req in requests:
+            try:
+                results.append(await req)
+            except UpstreamError as e:
+                results.append(e)
+    else:
+        results = await asyncio.gather(*requests, return_exceptions=True)
     extra = []
     for res in results:
-        if isinstance(res, BaseException):
-            log.info("via-point route failed: %s", res)
+        if isinstance(res, UpstreamError):
+            log.info("via-point route failed: %s", res)  # UpstreamError text never includes the URL
             continue
+        if isinstance(res, BaseException):
+            raise res
         extra.extend(res)
     _accept(sorted(extra, key=lambda r: r.duration_s), accepted, want)
     return accepted

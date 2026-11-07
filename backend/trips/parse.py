@@ -15,10 +15,13 @@ from datetime import datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from providers.jev import Departure, read_departure
+from typesafe_sdk import Choice, Question
+
+from providers import jev
 from providers.places import Place, search_places
 from trips import schemas as s
-from trips.service import MAX_LEAD_DAYS, tz_at
+from trips.limits import MAX_LEAD_DAYS
+from trips.timezones import tz_at
 
 SURE = 0.6  # below this Jev confidence the field is flagged for checking
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -38,6 +41,40 @@ _PATTERNS = (
 _LOAD = re.compile(r"(\d+(?:[.,]\d+)*)\s*(k\b|thousand\b)?\s*(lbs?\b|pounds?\b|#|tons?\b)?", re.I)
 _CLOCK = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?\b|\b(noon|midnight)\b", re.I)
 _EVERY = re.compile(r"every\s+(10|25|50)\s*(?:mi|miles?)\b", re.I)
+SPACINGS: dict[str, Literal[10, 25, 50]] = {"10": 10, "25": 25, "50": 50}
+
+
+@dataclass(frozen=True, slots=True)
+class Departure:
+    day: str  # a key of day_options(), or "unstated"
+    day_confidence: float
+    hour: str  # "h00".."h23", "now" or "unstated"
+    hour_confidence: float
+
+
+# Jev can't do date arithmetic, so it picks from concrete, labelled options. "unstated" goes first:
+# if Jev leans towards the first option, it leans towards not guessing.
+HOURS: dict[str, str] = {"unstated": "No time of day is mentioned", "now": "Right now, as soon as possible"} | {
+    f"h{h:02d}": f"{(h % 12) or 12} {'AM' if h < 12 else 'PM'}"
+    + (" (midnight)" if h == 0 else " (noon)" if h == 12 else "")
+    for h in range(24)
+}
+
+
+async def read_departure(text: str, days: dict[str, str]) -> Departure | None:
+    """Jev's reading of when the driver wants to leave; None if Jev is unavailable."""
+    questions: dict[str, Question] = {
+        "day": Choice(
+            instructions="On which day does the driver want to leave?",
+            criteria={"unstated": "No day is mentioned"} | days,
+        ),
+        "hour": Choice(instructions="At about what time of day does the driver want to leave?", criteria=HOURS),
+    }
+    res = await jev.ask(text, questions)
+    if res is None:
+        return None
+    day, hour = res.choices["day"], res.choices["hour"]
+    return Departure(day.choice, day.confidence, hour.choice, hour.confidence)
 
 
 @dataclass
@@ -75,7 +112,7 @@ def read_text(text: str) -> Parsed:
             p.load_lb = value
             break
     if m := _EVERY.search(text):
-        p.interval_mi = int(m[1])  # type: ignore[assignment]
+        p.interval_mi = SPACINGS[m[1]]
     if m := _CLOCK.search(text):
         if m[4]:
             p.clock = (12, 0) if m[4].lower() == "noon" else (0, 0)
@@ -119,16 +156,18 @@ def rules_departure(text: str, now: datetime) -> Departure:
     return Departure(day, 1.0, hour, 1.0)
 
 
-def combine(jev: Departure | None, rules: Departure) -> Departure:
+def combine(by_jev: Departure | None, rules: Departure) -> Departure:
     """Jev's reading, with the keyword rules filling anything Jev left unstated (flagged for checking)."""
-    if jev is None:
+    if by_jev is None:
         return rules
     day, day_c = (
-        (jev.day, jev.day_confidence) if jev.day != "unstated" else (rules.day, 0.0 if rules.day != "unstated" else 1.0)
+        (by_jev.day, by_jev.day_confidence)
+        if by_jev.day != "unstated"
+        else (rules.day, 0.0 if rules.day != "unstated" else 1.0)
     )
     hour, hour_c = (
-        (jev.hour, jev.hour_confidence)
-        if jev.hour != "unstated"
+        (by_jev.hour, by_jev.hour_confidence)
+        if by_jev.hour != "unstated"
         else (rules.hour, 0.0 if rules.hour != "unstated" else 1.0)
     )
     return Departure(day, day_c, hour, hour_c)
@@ -171,8 +210,8 @@ async def parse_trip(text: str, browser_tz: str) -> s.ParsedTripOut:
     origin = places.get("origin")
     tz = ZoneInfo(tz_at(origin.lat, origin.lon) if origin else browser_tz)
     now = datetime.now(tz)
-    jev = await read_departure(text, day_options(now))
-    departure, unsure = resolve_departure(combine(jev, rules_departure(text, now)), p.clock, now)
+    by_jev = await read_departure(text, day_options(now))
+    departure, unsure = resolve_departure(combine(by_jev, rules_departure(text, now)), p.clock, now)
     if unsure:
         p.unsure.append("departure")
     return s.ParsedTripOut(
@@ -182,7 +221,7 @@ async def parse_trip(text: str, browser_tz: str) -> s.ParsedTripOut:
         load_lb=p.load_lb,
         interval_mi=p.interval_mi,
         unsure=p.unsure,
-        read_by="jev" if jev else "rules",
+        read_by="jev" if by_jev else "rules",
     )
 
 

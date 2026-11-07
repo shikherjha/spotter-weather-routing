@@ -141,22 +141,19 @@ class DepartureAdviceOut(BaseModel):
 
 
 class HeatmapOut(BaseModel):
-    """Columnar, byte-packed so the 0-48 h slider never touches the network.
+    """Corridor risk for the 0-48 h slider, byte-packed so moving the slider never touches the network.
 
-    risk:   base64 uint8[cells x hours], row-major; 0-4 level, 255 = no data
-    sample_*: base64 uint8[samples x hours] for tooltips (wind mph, rain 0.01 in/hr, snow 0.1 in/hr)
-    sample_of: index of the weather sample nearest each render cell
+    risk: base64 uint8[cells x hours], row-major; 0-4 level, 255 = no data.
     """
 
     cells: list[str]
     start: int
     hours: int
     risk: str
-    samples: int
-    sample_of: list[int]
-    sample_wind: str
-    sample_rain: str
-    sample_snow: str
+    resolution: int = Field(description="H3 resolution of `cells`")
+
+
+Hazard = Literal["snow_ice", "wind", "flood", "visibility", "storm", "temperature", "other"]
 
 
 class WarningHitOut(BaseModel):
@@ -178,7 +175,7 @@ class WarningOut(BaseModel):
     ends: int | None
     summary: str = Field(description="The alert's own WHAT and IMPACTS lines")
     instruction: str
-    hazard: Literal["snow_ice", "wind", "flood", "visibility", "storm", "temperature", "other"]
+    hazard: Hazard
     relevant: bool = Field(description="Jev: does this matter to a heavy, high-sided truck?")
     road_closure: bool
     truck_risk: float

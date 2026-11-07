@@ -5,12 +5,13 @@ from hypothesis import strategies as st
 
 from engine.advisor import sweep_departures
 from engine.corridor import build_corridor, route_signature, shared_fraction
-from engine.eta import HOUR, DriveProfile, TripClock
+from engine.eta import DriveProfile, TripClock
 from engine.evaluate import RoutePlan, evaluate
 from engine.geometry import Polyline
 from engine.rules import Risk
 from engine.sampling import place_checkpoints
 from engine.scoring import Advice, RouteScore, rank, score_route
+from engine.units import HOUR
 from engine.weather import WeatherGrid
 
 
@@ -32,6 +33,13 @@ def test_no_travel_is_a_hard_gate_above_severe() -> None:
     assert r.recommended.route_id == "b"
     assert r.decisions[0].criterion == "no_travel_mi"
     assert r.advice is Advice.CAUTION
+
+
+def test_weather_beyond_the_forecast_cannot_win_a_ranking() -> None:
+    seen = _score("a", severe=20, low=780)
+    mostly_unseen = RouteScore("b", (70, 0, 0, 10, 0), 720.0, 10 * HOUR)  # 10 Severe in the 80 mi it can see
+    r = rank([mostly_unseen, seen])
+    assert r.recommended.route_id == "a" and r.decisions[0].criterion == "unknown_mi"
 
 
 def test_all_routes_no_travel_means_delay() -> None:

@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from providers.http import UpstreamError, client, retrying
+from providers.http import UpstreamError, fetch, json_or_error
 from providers.routing.base import LatLon, RouteCandidate
 
 
@@ -32,11 +32,8 @@ class OsrmRouting:
             "geometries": "geojson",
             "annotations": "duration",
         }
-        async for attempt in retrying():
-            with attempt:
-                resp = await client().get(f"{self._base}/route/v1/driving/{coords}", params=params)
-                resp.raise_for_status()
-        body = resp.json()
+        resp = await fetch(self.name, "GET", f"{self._base}/route/v1/driving/{coords}", params=params)
+        body = json_or_error(self.name, resp)
         if body.get("code") != "Ok":
             raise UpstreamError(self.name, body.get("message", body.get("code", "no route")))
         return [self._parse(r) for r in body["routes"]]
@@ -45,7 +42,7 @@ class OsrmRouting:
         coords = np.asarray([[lat, lon] for lon, lat in route["geometry"]["coordinates"]], dtype=np.float64)
         seg = np.concatenate([leg["annotation"]["duration"] for leg in route["legs"]])
         cum = np.concatenate(([0.0], np.cumsum(seg)))
-        if len(cum) != len(coords):  # defensive: fall back to distance-proportional timing
+        if len(cum) != len(coords):  # annotation and geometry disagree: spread the total time evenly
             frac = np.linspace(0.0, 1.0, len(coords))
             cum = frac * float(route["duration"])
         return RouteCandidate(coords, cum, self.name, self.truck_aware)

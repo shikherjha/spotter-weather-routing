@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from engine.evaluate import RoutePlan, evaluate
 from engine.rules import WindBasis
 from engine.scoring import CRITERIA, Advice, RouteScore, rank
-from engine.weather import HOUR, WeatherGrid
+from engine.units import HOUR
+from engine.weather import WeatherGrid
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def sweep_departures(
         scores = [evaluate(p, grid, load_lb, wind_basis, departure_offset_s=h * HOUR).score for p in plans]
         r = rank(scores)
         options.append(DepartureOption(h, r.recommended, r.advice))
-    # Unknown (beyond-horizon) miles make a departure ineligible to be "best".
-    eligible = [o for o in options if o.best.unknown_mi == 0] or options
-    best = min(eligible, key=_departure_key)
+    # Later departures push more of the trip past the forecast; the unknown-miles criterion in
+    # CRITERIA ranks those below departures whose weather can be seen.
+    best = min(options, key=_departure_key)
     return DepartureAdvice(options, best.offset_h)

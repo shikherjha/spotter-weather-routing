@@ -6,10 +6,10 @@ import pytest
 from shapely.geometry import box
 
 import providers.jev
-from providers.jev import triage
 from providers.nws import Alert, PointInfo, parse_alert
 from trips import schemas as s
 from trips import warnings as w
+from trips.triage import triage
 
 T0 = 1_800_000_000
 H = 3600
@@ -107,7 +107,7 @@ class _FakeJev:
 
 async def test_jev_answers_are_used_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     jev = _FakeJev()
-    monkeypatch.setattr(providers.jev, "_client", lambda: jev)
+    monkeypatch.setattr(providers.jev, "client", lambda: jev)
     a = _alert(event="High Wind Warning")
     first = (await triage([a]))[a.id]
     again = (await triage([a]))[a.id]
@@ -123,9 +123,15 @@ async def test_jev_answers_are_used_and_cached(monkeypatch: pytest.MonkeyPatch) 
 
 
 async def test_jev_failure_falls_back_to_rules(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(providers.jev, "_client", lambda: _FakeJev(fail=True))
+    monkeypatch.setattr(providers.jev, "client", lambda: _FakeJev(fail=True))
     t = (await triage([_alert(event="Blizzard Warning")]))["a1"]
     assert (t.by, t.hazard, t.relevant) == ("rules", "snow_ice", True)
+
+
+def test_wind_chill_is_about_cold_not_wind() -> None:
+    from trips.triage import rules_triage
+
+    assert rules_triage(_alert(event="Wind Chill Warning")).hazard == "temperature"
 
 
 def test_plain_words_falls_back_to_the_headline_in_sentence_case() -> None:

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from engine.geometry import FloatArray
+from engine.units import FloatArray
 
 ALLOWED_INTERVALS_MI = (10, 25, 50)
 

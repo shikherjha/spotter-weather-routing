@@ -11,10 +11,10 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from engine.units import FloatArray
+
 EARTH_RADIUS_MI = 3958.7613
 METERS_PER_MILE = 1609.344
-
-FloatArray = NDArray[np.float64]
 
 
 def haversine_mi(lat1: FloatArray, lon1: FloatArray, lat2: FloatArray, lon2: FloatArray) -> FloatArray:

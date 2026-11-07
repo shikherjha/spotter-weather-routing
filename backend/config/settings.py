@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import dj_database_url
-
 from config.env import get_env
 
 env = get_env()
@@ -30,8 +28,8 @@ ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {"default": dj_database_url.parse(env.database_url, conn_max_age=60)}
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+# No database: trips live in the cache (Redis) for a day, and nothing else is stored.
+DATABASES: dict[str, dict[str, str]] = {}
 
 CACHES = (
     {"default": {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": env.redis_url}}

@@ -6,6 +6,7 @@ import httpx
 import numpy as np
 import pytest
 import respx
+from pydantic import SecretStr
 
 from providers.http import UpstreamError
 from providers.routing.alternatives import distinct_routes
@@ -15,6 +16,27 @@ from providers.routing.tomtom import TomTomRouting
 from providers.weather.openmeteo import HORIZON_H, OpenMeteoWeather, _parse_location
 
 DEPART = datetime(2026, 11, 9, 12, tzinfo=UTC)
+
+
+@respx.mock
+async def test_upstream_failures_never_show_the_request_url() -> None:
+    respx.get(url__startswith="https://api.tomtom.com/").mock(return_value=httpx.Response(503))
+    with pytest.raises(UpstreamError) as err:
+        await TomTomRouting("SECRET123").routes([LatLon(32.7, -96.8), LatLon(39.7, -105.0)], DEPART, 40_000, 0)
+    assert err.value.status == 503 and "SECRET123" not in str(err.value) and err.value.__cause__ is None
+
+
+@respx.mock
+async def test_place_search_escapes_the_query_in_the_url_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from providers import places
+
+    monkeypatch.setattr(places, "get_env", lambda: type("Env", (), {"tomtom_api_key": SecretStr("k")})())
+    respx.get(url__startswith="https://photon.komoot.io/").mock(return_value=httpx.Response(500))
+    tomtom = respx.get(url__startswith="https://api.tomtom.com/search/").mock(
+        return_value=httpx.Response(200, json={"results": []})
+    )
+    await places.search_places("../routing/x?y")
+    assert "/search/..%2Frouting%2Fx%3Fy.json" in str(tomtom.calls.last.request.url)
 
 
 def test_times_from_anchors_spreads_by_distance() -> None:
@@ -48,7 +70,8 @@ async def test_tomtom_parses_multi_leg_route_without_duplicate_junction() -> Non
     assert len(out) == 1 and out[0].coords.shape == (3, 2)
     assert list(out[0].cum_drive_s) == pytest.approx([0, 150, 300], rel=1e-3)
     params = route.calls.last.request.url.params
-    assert params["travelMode"] == "truck" and params["vehicleWeight"] == "18144"
+    # Gross weight: 35,000 lb empty truck + 40,000 lb load, in kg.
+    assert params["travelMode"] == "truck" and params["vehicleWeight"] == "34019"
     assert "maxAlternatives" not in params  # not allowed with via points
 
 
@@ -108,13 +131,16 @@ async def test_duplicates_are_removed_and_via_points_fill_to_three() -> None:
     assert mids[0] < 35.0 - 0.1 and mids[-1] > 35.0 + 0.1  # one detour on each side of the axis
 
 
+RUN = 1_800_000_000
+
+
 def _om_location(n: int, wind: float = 10.0, null: bool = False) -> dict:
     def series(v: float) -> list[float | None]:
         return [None if null else v] * n
 
     return {
         "hourly": {
-            "time": list(range(n)),
+            "time": [RUN + 3600 * i for i in range(n)],
             "wind_speed_10m": series(wind),
             "wind_gusts_10m": series(wind + 5),
             "wind_direction_10m": series(270),
@@ -125,6 +151,18 @@ def _om_location(n: int, wind: float = 10.0, null: bool = False) -> dict:
             "weather_code": series(61),
         }
     }
+
+
+@respx.mock
+async def test_open_meteo_rejects_a_forecast_on_a_different_time_axis() -> None:
+    respx.get(url__regex=r".*/meta\.json").mock(
+        return_value=httpx.Response(200, json={"last_run_initialisation_time": RUN})
+    )
+    shifted = _om_location(HORIZON_H + 1)
+    shifted["hourly"]["time"] = [t + 3600 for t in shifted["hourly"]["time"]]
+    respx.post("https://api.open-meteo.com/v1/forecast").mock(return_value=httpx.Response(200, json=[shifted]))
+    with pytest.raises(UpstreamError, match="expected"):
+        await OpenMeteoWeather("ncep_nbm_conus").grid([h3.latlng_to_cell(35.0, -100.0, 5)])
 
 
 def test_parse_location_sums_rain_and_showers_and_keeps_nulls_as_nan() -> None:
@@ -139,7 +177,7 @@ async def test_open_meteo_batches_caches_and_falls_back_for_uncovered_cells() ->
     covered = h3.latlng_to_cell(39.7, -105.0, 5)
     uncovered = h3.latlng_to_cell(53.5, -113.5, 5)  # Edmonton: outside NBM CONUS
     respx.get(url__regex=r".*/meta\.json").mock(
-        return_value=httpx.Response(200, json={"last_run_initialisation_time": 1_800_000_000})
+        return_value=httpx.Response(200, json={"last_run_initialisation_time": RUN})
     )
 
     def forecast(request: httpx.Request) -> httpx.Response:

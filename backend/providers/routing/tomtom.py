@@ -7,16 +7,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 import numpy as np
 
-from providers.http import UpstreamError, client, retrying
+from providers.http import UpstreamError, fetch, json_or_error
 from providers.routing.base import LatLon, RouteCandidate, times_from_anchors
 
 LB_TO_KG = 0.45359237
+TARE_LB = 35_000  # empty tractor and 53 ft trailer; TomTom's vehicleWeight is the gross weight
 BASE_URL = "https://api.tomtom.com/routing/1/calculateRoute"
 
 
@@ -34,10 +35,10 @@ class TomTomRouting:
             "key": self._key,
             "travelMode": "truck",
             "vehicleCommercial": "true",
-            "vehicleWeight": round(load_lb * LB_TO_KG),
+            "vehicleWeight": round((TARE_LB + load_lb) * LB_TO_KG),
             "routeType": "fastest",
             "traffic": "false",  # departures are hours/days out; historic speeds are the honest choice
-            "departAt": depart_at.isoformat(timespec="seconds"),
+            "departAt": max(depart_at, datetime.now(UTC)).isoformat(timespec="seconds"),  # past times are rejected
             "routeRepresentation": "polyline",
             "extendedRouteRepresentation": ["distance", "travelTime"],
         }
@@ -45,13 +46,11 @@ class TomTomRouting:
             params["maxAlternatives"] = alternatives
         url = f"{BASE_URL}/{':'.join(str(w) for w in waypoints)}/json"
 
-        async for attempt in retrying():
-            with attempt:
-                resp = await client().get(url, params=params)
-                if resp.status_code in {400, 403}:
-                    raise UpstreamError(self.name, _error_text(resp), resp.status_code)
-                resp.raise_for_status()
-        return [self._parse(r) for r in resp.json().get("routes", [])]
+        resp = await fetch(self.name, "GET", url, params=params)
+        if not resp.is_success:
+            raise UpstreamError(self.name, _error_text(resp), resp.status_code)
+        body = json_or_error(self.name, resp)
+        return [self._parse(r) for r in body.get("routes", [])]
 
     def _parse(self, route: dict[str, Any]) -> RouteCandidate:
         pts: list[list[float]] = []
