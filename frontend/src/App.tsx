@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { getTrip, planTrip } from "./api/client";
 import type { Trip, TripRequest } from "./api/types";
-import { DemoNote, LeaveLater, RouteList, TripLine, Verdict } from "./components/Answer";
+import { DemoNote, LeaveLater, RouteList, TripLine, Verdict, WarningLink } from "./components/Answer";
 import { Details } from "./components/Details";
 import { MapView, type Padding } from "./components/MapView";
 import { TimeSlider } from "./components/TimeSlider";
@@ -120,6 +120,7 @@ export default function App() {
             <div className="flex flex-col gap-3 p-3 pb-6">
               <RouteList trip={trip} />
               <LeaveLater trip={trip} onReplan={replan} busy={plan.isPending} />
+              <WarningLink trip={trip} />
             </div>
             {panel && route && (
               <div className="fixed inset-0 z-30">
@@ -152,6 +153,7 @@ export default function App() {
             {answer}
             <RouteList trip={trip} />
             <LeaveLater trip={trip} onReplan={replan} busy={plan.isPending} />
+            <WarningLink trip={trip} />
           </section>
           <section aria-label="Forecast time" className="absolute bottom-6 left-[420px] z-10 w-[min(760px,calc(100%-640px))] min-w-[440px] rounded-[14px] bg-surface py-3 pr-[18px] pl-3 shadow-float">
             <TimeSlider trip={trip} />

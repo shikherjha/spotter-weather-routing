@@ -1,5 +1,5 @@
 // Turns the API's numbers into the few plain sentences and markers the screen shows.
-import type { Checkpoint, Level, Route, Trip } from "../api/types";
+import type { Checkpoint, Level, Route, Trip, Warning, WarningHit } from "../api/types";
 import { hazard, isBad, LEVEL_NAMES, reading, why } from "./risk";
 import { clock, when, zoneName } from "./time";
 
@@ -39,10 +39,10 @@ export function verdict(trip: Trip) {
   } else if (!w || !isBad(w.level)) {
     sentence = n > 1 ? `Clear weather the whole way, and the fastest safe option of ${n}.` : "Clear weather the whole way.";
   } else {
-    const at = `${hazard(w)} around ${when(w.eta, w.tz)}`;
+    const at = `${hazard(w)}${w.place ? ` near ${w.place}` : ""} around ${when(w.eta, w.tz)}`;
     sentence =
       advice === "caution"
-        ? `${at}, but it's still the safest of the ${n}.`
+        ? `${at}, but ${n > 1 ? `it's still the safest of the ${n}` : "it's the only route found"}.`
         : `${at}; nothing worse than High on the way.`;
   }
   return { label, headline: `Take Route ${rec.id}`, sentence, advice };
@@ -169,7 +169,7 @@ export interface Row {
   weather: string;
   level: Level | null;
   why: string;
-  kind: "point" | "stop" | "zone" | "end";
+  kind: "point" | "stop" | "zone" | "end" | "warning";
 }
 
 /** Stop-by-stop rows. Compact mode keeps the ends, stops, zone changes and any weather above Low. */
@@ -187,7 +187,7 @@ export function itinerary(trip: Trip, r: Route, all: boolean): Row[] {
     rows.push({
       key: `c${i}`,
       mile: cp.mile,
-      place: i === 0 ? trip.origin.label : i === cps.length - 1 ? trip.destination.label : `Mile ${Math.round(cp.mile)}`,
+      place: i === 0 ? short(trip.origin.label) : i === cps.length - 1 ? short(trip.destination.label) : (cp.place ?? `Mile ${Math.round(cp.mile)}`),
       time: when(cp.eta, cp.tz),
       weather: reading(cp),
       level: cp.level,
@@ -207,7 +207,36 @@ export function itinerary(trip: Trip, r: Route, all: boolean): Row[] {
       kind: "stop",
     });
   }
+  for (const { warning, hit } of warningsOn(trip, r.id)) {
+    rows.push({
+      key: `w${warning.id}`,
+      mile: hit.from_mi - 0.01,
+      place: `Into ${warning.event}`,
+      time: when(hit.enter, hit.tz),
+      weather: "",
+      level: null,
+      why: "Official warning",
+      kind: "warning",
+    });
+  }
   return rows.sort((a, b) => a.mile - b.mile);
+}
+
+/** "Dallas, Texas, United States" → "Dallas, Texas" */
+export const short = (label: string) => label.replace(/, United States( of America)?$/, "");
+
+/** Warnings that matter to a truck on this route, in the order the API ranked them. */
+export function warningsOn(trip: Trip, routeId: string, relevant = true): { warning: Warning; hit: WarningHit }[] {
+  return trip.warnings.flatMap((warning) => {
+    const hit = warning.routes.find((h) => h.route_id === routeId);
+    return hit && warning.relevant === relevant ? [{ warning, hit }] : [];
+  });
+}
+
+/** "Raton Pass, Trinidad and 1 more" */
+export function shortArea(area: string): string {
+  const parts = area.split(";").map((p) => p.trim()).filter(Boolean);
+  return parts.length <= 2 ? parts.join(" and ") : `${parts.slice(0, 2).join(", ")} and ${parts.length - 2} more`;
 }
 
 export const levelName = (l: Level | null) => (l === null ? "" : LEVEL_NAMES[l]);

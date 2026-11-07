@@ -41,6 +41,15 @@ export function WarnIcon({ className = "" }: { className?: string }) {
   );
 }
 
+export function AlertIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="var(--severe)" strokeWidth="1.6" className="shrink-0">
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M8 4.5 V8.5 M8 10.8 V11.4" />
+    </svg>
+  );
+}
+
 export function CheckIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6">

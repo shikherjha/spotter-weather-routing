@@ -1,8 +1,8 @@
 import type { Trip } from "../api/types";
 import { duration, longWhen } from "../lib/time";
-import { leaveLater, routeStatus, verdict } from "../lib/trip";
+import { leaveLater, routeStatus, shortArea, verdict, warningsOn } from "../lib/trip";
 import { useUi } from "../state";
-import { CheckIcon, Shield, WarnIcon } from "./bits";
+import { AlertIcon, CheckIcon, Shield, WarnIcon } from "./bits";
 
 export function TripLine({ trip, onEdit }: { trip: Trip; onEdit: () => void }) {
   const short = (label: string) => label.split(",")[0];
@@ -87,6 +87,31 @@ export function LeaveLater({ trip, onReplan, busy }: { trip: Trip; onReplan: (de
     >
       <span className="text-[15px] font-bold">{busy ? "Planning…" : l.title}</span>
       <span className="num text-[13px] text-ink-2">{l.sub}</span>
+    </button>
+  );
+}
+
+/** The most important official warning on the selected route, one tap from its full text. */
+export function WarningLink({ trip }: { trip: Trip }) {
+  const { selected, openPanel } = useUi();
+  const routeId = selected ?? trip.recommendation.route_id;
+  if (trip.warnings_status === "unavailable") {
+    return <p className="m-0 text-[13px] text-ink-2">Official weather warnings are unavailable right now.</p>;
+  }
+  const found = warningsOn(trip, routeId);
+  if (!found.length) return null;
+  const { warning } = found[0];
+  const more = found.length - 1;
+  return (
+    <button type="button" onClick={() => openPanel("stops")} className="flex min-h-11 items-center gap-2 text-left text-sm font-semibold">
+      <AlertIcon />
+      <span className="flex-1">
+        {warning.event} for {shortArea(warning.area)}
+        {more > 0 && <span className="font-normal text-ink-2"> · {more} more</span>}
+      </span>
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="var(--ink-2)" strokeWidth="1.6">
+        <path d="M5 2.5 L9.5 7 L5 11.5" />
+      </svg>
     </button>
   );
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { Checkpoint, Level, Route, Trip } from "../api/types";
+import type { Checkpoint, Level, Route, Trip, Warning } from "../api/types";
 import { why } from "./risk";
 import { duration, when } from "./time";
-import { itinerary, leaveLater, mileAt, routeStatus, troubleSpots, verdict } from "./trip";
+import { itinerary, leaveLater, mileAt, routeStatus, shortArea, troubleSpots, verdict, warningsOn } from "./trip";
 
 const T0 = Date.UTC(2026, 10, 7, 18) / 1000; // Sat Nov 7, 12:00 PM CST
 const H = 3600;
@@ -25,6 +25,7 @@ function cp(mile: number, level: Level, extra: Partial<Checkpoint> = {}): Checkp
     reason: level ? "snow" : "Within safe limits",
     load_escalated: false,
     confidence: "high",
+    place: null,
     ...extra,
   };
 }
@@ -72,6 +73,8 @@ function trip(routes: Route[], extra: Partial<Trip> = {}): Trip {
     recommendation: { route_id: routes[0].id, advice: "caution", headline: "", reasons: [] },
     departure_advice: { best_offset_h: 0, options: [] },
     heatmap: { cells: [], start: T0, hours: 49, risk: "", samples: 0, sample_of: [], sample_wind: "", sample_rain: "", sample_snow: "" },
+    warnings: [],
+    warnings_status: "ok",
     ...extra,
   };
 }
@@ -175,5 +178,52 @@ describe("why", () => {
   it("explains a load-rule escalation in words", () => {
     expect(why(cp(0, 4, { drivers: ["wind"], load_escalated: true }))).toBe("Wind 45–54 mph, load over 30,000 lb");
     expect(why(cp(0, 3))).toBe("Snow 2–3 in/hr");
+  });
+});
+
+describe("warnings and places", () => {
+  const warning = (relevant: boolean, routeId = "B"): Warning => ({
+    id: relevant ? "w1" : "w2",
+    event: relevant ? "Winter Storm Warning" : "Frost Advisory",
+    severity: "Severe",
+    area: "Raton Pass; Trinidad; Southern Colfax County",
+    starts: T0,
+    ends: T0 + 20 * H,
+    summary: "Heavy snow expected.",
+    instruction: "",
+    hazard: relevant ? "snow_ice" : "temperature",
+    relevant,
+    road_closure: relevant,
+    truck_risk: relevant ? 0.96 : 0.3,
+    triage: "jev",
+    source: "simulated",
+    url: null,
+    routes: [{ route_id: routeId, from_mi: 575, to_mi: 625, enter: T0 + 9 * H, tz: "America/Denver" }],
+  });
+
+  it("says where the bad weather is when the town is known", () => {
+    const r = route("B", [0, 0, 0, 0, 0, 0, 3, 0]);
+    r.checkpoints[6].place = "Trinidad, CO";
+    expect(verdict(trip([r])).sentence).toBe("Heavy snow near Trinidad, CO around Sat 9:00 PM MST, but it's the only route found.");
+  });
+
+  it("splits warnings into the ones that matter to a truck and the ones Jev set aside", () => {
+    const t = trip([route("B", [0, 0])], { warnings: [warning(true), warning(false), warning(true, "A")] });
+    expect(warningsOn(t, "B").map((x) => x.warning.event)).toEqual(["Winter Storm Warning"]);
+    expect(warningsOn(t, "B", false).map((x) => x.warning.event)).toEqual(["Frost Advisory"]);
+  });
+
+  it("marks where the route enters a warning, and names towns", () => {
+    const r = route("B", [0, 0, 0, 0, 0, 0, 3, 0], {}, 100);
+    r.checkpoints[6].place = "Trinidad, CO";
+    const rows = itinerary(trip([r], { warnings: [warning(true)] }), r, false);
+    const at = rows.findIndex((x) => x.kind === "warning");
+    expect(rows[at].place).toBe("Into Winter Storm Warning");
+    expect(rows[at + 1].place).toBe("Trinidad, CO");
+  });
+
+  it("shortens long NWS area lists", () => {
+    expect(shortArea("Raton Pass; Trinidad; Southern Colfax County")).toBe("Raton Pass, Trinidad and 1 more");
+    expect(shortArea("Logan; Gove")).toBe("Logan and Gove");
   });
 });

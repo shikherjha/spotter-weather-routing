@@ -45,6 +45,7 @@ export interface Checkpoint {
   reason: string;
   load_escalated: boolean;
   confidence: "high" | "medium" | "low";
+  place: string | null; // nearest town, from the NWS
 }
 
 export interface Segment {
@@ -106,6 +107,34 @@ export interface Heatmap {
   sample_snow: string;
 }
 
+export interface WarningHit {
+  route_id: string;
+  from_mi: number;
+  to_mi: number;
+  enter: number;
+  tz: string;
+}
+
+/** An official NWS alert the truck would drive into while it is in effect. */
+export interface Warning {
+  id: string;
+  event: string;
+  severity: string;
+  area: string;
+  starts: number;
+  ends: number | null;
+  summary: string; // the alert's own WHAT and IMPACTS lines
+  instruction: string;
+  hazard: "snow_ice" | "wind" | "flood" | "visibility" | "storm" | "temperature" | "other";
+  relevant: boolean; // Jev: does it matter to a heavy, high-sided truck?
+  road_closure: boolean;
+  truck_risk: number;
+  triage: "jev" | "rules";
+  source: "nws" | "simulated";
+  url: string | null;
+  routes: WarningHit[];
+}
+
 export interface Trip {
   id: string;
   created: number;
@@ -123,4 +152,6 @@ export interface Trip {
   recommendation: { route_id: string; advice: Advice; headline: string; reasons: string[] };
   departure_advice: { best_offset_h: number; options: DepartureOption[] };
   heatmap: Heatmap;
+  warnings: Warning[];
+  warnings_status: "ok" | "unavailable";
 }

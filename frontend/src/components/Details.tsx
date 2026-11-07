@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import type { Route, Trip } from "../api/types";
 import { RISK_HEX } from "../lib/risk";
 import { duration, localHour, tick, when } from "../lib/time";
-import { arrivalTz, itinerary, pointAtMile } from "../lib/trip";
+import { arrivalTz, itinerary, pointAtMile, shortArea, warningsOn } from "../lib/trip";
 import { useUi, type Panel } from "../state";
-import { CloseIcon, LevelChip, Shield } from "./bits";
+import { AlertIcon, CloseIcon, LevelChip, Shield } from "./bits";
 
 const HOUR = 3600;
 const RENDER_RES = 6; // backend/engine/corridor.py RENDER_RES: the heatmap's cell size
@@ -49,7 +49,14 @@ export function Details({ trip, route }: { trip: Trip; route: Route }) {
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-auto md:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0">{panel === "timeline" ? <Timeline trip={trip} route={route} /> : <Stops trip={trip} route={route} />}</div>
         <aside className="flex flex-col gap-5 border-rule p-6 max-md:border-t md:border-l">
-          {panel === "timeline" ? <HowToRead /> : <WhyRoute trip={trip} route={route} />}
+          {panel === "timeline" ? (
+            <HowToRead />
+          ) : (
+            <>
+              <Warnings trip={trip} route={route} />
+              <WhyRoute trip={trip} route={route} />
+            </>
+          )}
         </aside>
       </div>
     </section>
@@ -76,7 +83,7 @@ function Stops({ trip, route }: { trip: Trip; route: Route }) {
           {rows.map((r) => (
             <tr key={r.key} className={`h-8 border-t border-rule ${r.kind === "stop" || r.kind === "zone" ? "bg-tint" : ""}`}>
               <td className="pl-6 text-ink-2 max-md:pl-4">{r.kind === "zone" ? "" : Math.round(r.mile)}</td>
-              <td className={`px-2 ${r.kind === "point" ? "" : "font-semibold"}`}>{r.place}</td>
+              <td className={`px-2 ${r.kind === "point" ? "" : "font-semibold"} ${r.kind === "warning" ? "text-severe" : ""}`}>{r.place}</td>
               <td className="px-2">{r.time}</td>
               <td className="px-2 max-md:hidden">{r.weather}</td>
               <td className="px-2">{r.kind === "point" || r.kind === "end" ? <LevelChip level={r.level} /> : null}</td>
@@ -88,6 +95,52 @@ function Stops({ trip, route }: { trip: Trip; route: Route }) {
       <button type="button" onClick={() => setAll(!all)} className="h-11 self-start px-6 text-sm font-semibold text-accent max-md:px-4">
         {all ? "Show only the parts that matter" : `Show all ${route.checkpoints.length} checkpoints`}
       </button>
+    </div>
+  );
+}
+
+function Warnings({ trip, route }: { trip: Trip; route: Route }) {
+  if (trip.warnings_status === "unavailable") {
+    return <p className="m-0 text-sm text-ink-2">Official weather warnings are unavailable right now. Check weather.gov before you leave.</p>;
+  }
+  const found = warningsOn(trip, route.id);
+  const setAside = warningsOn(trip, route.id, false);
+  if (!found.length && !setAside.length) return null;
+  return (
+    <div className="flex flex-col gap-4 border-b border-rule pb-5">
+      {found.map(({ warning: w, hit }) => (
+        <article key={w.id} className="flex flex-col gap-1.5">
+          <h3 className="m-0 flex items-center gap-2 text-[15px] font-bold">
+            <AlertIcon /> {w.event}
+          </h3>
+          <p className="num m-0 text-sm leading-[21px]">
+            {shortArea(w.area)}
+            {w.ends && <>, until {when(w.ends, hit.tz)}</>}. You'd reach it {when(hit.enter, hit.tz)}, miles{" "}
+            {Math.round(hit.from_mi)}–{Math.round(hit.to_mi)}.
+          </p>
+          <p className="m-0 text-sm leading-[21px]">{w.summary}</p>
+          {w.road_closure && (
+            <span className="self-start rounded bg-tint px-2 py-0.5 text-xs font-bold text-severe">Roads may close</span>
+          )}
+          <span className="text-xs text-ink-2">
+            {w.source === "simulated" ? (
+              "Simulated warning for the demo storm"
+            ) : w.url ? (
+              <a href={w.url} target="_blank" rel="noreferrer" className="text-ink-2 underline">
+                National Weather Service
+              </a>
+            ) : (
+              "National Weather Service"
+            )}
+            {w.triage === "jev" ? " · relevance checked by Jev" : ""}
+          </span>
+        </article>
+      ))}
+      {setAside.length > 0 && (
+        <p className="m-0 text-[13px] leading-5 text-ink-2">
+          Also in effect, not a driving hazard: {setAside.map(({ warning }) => warning.event).join(", ")}.
+        </p>
+      )}
     </div>
   );
 }
