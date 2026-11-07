@@ -35,6 +35,7 @@ from engine.scoring import CRITERIA, Advice, Ranking, rank
 from engine.weather import WeatherGrid
 from providers.routing import LatLon, RouteCandidate, get_routing_provider
 from providers.routing.alternatives import distinct_routes
+from providers.weather.demo import DemoStormWeather
 from providers.weather.openmeteo import get_weather_provider
 from trips import schemas as s
 
@@ -337,7 +338,7 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
     t_route = time.perf_counter()
 
     prep = await asyncio.to_thread(_prepare, cands, depart_s, req)
-    weather = get_weather_provider()
+    weather = DemoStormWeather(depart_s) if req.weather == "demo_storm" else get_weather_provider()
     grid = await weather.grid(prep.weather_cells)
     t_wx = time.perf_counter()
 

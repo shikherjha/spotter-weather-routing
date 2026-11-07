@@ -27,6 +27,9 @@ class TripRequest(BaseModel):
     interval_mi: Literal[10, 25, 50] = 25
     wind_basis: WindBasis = WindBasis.SUSTAINED
     hos: bool = Field(default=True, description="Apply FMCSA Hours-of-Service rest stops to ETAs")
+    weather: Literal["live", "demo_storm"] = Field(
+        default="live", description="demo_storm swaps the forecast for a labelled, simulated storm"
+    )
 
     @model_validator(mode="after")
     def _distinct_endpoints(self) -> TripRequest:
