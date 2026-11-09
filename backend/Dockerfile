@@ -11,5 +11,5 @@ COPY . .
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
-# Railway sets PORT. One async worker is plenty: requests spend their time waiting on providers.
-CMD ["sh", "-c", "uvicorn config.asgi:application --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips '*'"]
+# One async API process is plenty (requests wait on I/O, not CPU), plus the data worker.
+CMD ["./start.sh"]
