@@ -1,7 +1,8 @@
 """Forecasts read from the NBM copy `nbm.sync` keeps on disk.
 
-A trip's cells (a few thousand with the heatmap) are rows of one memory-mapped array, so a
-forecast costs a fraction of a second and no network. It's used for trips it covers; the few
+The copy (~380 MB) is read into memory once per forecast run, so a trip's cells (a few thousand
+with the heatmap) are rows of one in-memory array: a fraction of a second and no network. A
+memory map was tried first; on a network volume its scattered page reads took seconds per trip. It's used for trips it covers; the few
 cells just over a border come from Open-Meteo's GFS and are put on the same hourly axis.
 """
 
@@ -37,7 +38,7 @@ class _Run:
     run_s: float
     times: np.ndarray  # (H,) unix seconds
     cells: np.ndarray  # (N,) uint64, sorted
-    data: np.ndarray  # (N, rows, H) float16, memory-mapped
+    data: np.ndarray  # (N, rows, H) float16
 
 
 _lock = threading.Lock()
@@ -62,7 +63,7 @@ def _load(root: Path) -> _Run | None:
                     run_s=float(meta["run"]),
                     times=meta["first"] + HOUR * np.arange(meta["hours"], dtype=np.float64),
                     cells=np.load(folder / "cells.npy"),
-                    data=np.load(folder / "forecast.npy", mmap_mode="r"),
+                    data=np.load(folder / "forecast.npy"),  # one sequential read per run
                 )
         except (OSError, ValueError, KeyError) as e:
             log.info("no local NBM copy in %s (%s)", root, type(e).__name__)
