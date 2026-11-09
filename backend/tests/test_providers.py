@@ -10,7 +10,7 @@ from pydantic import SecretStr
 
 from providers.http import UpstreamError
 from providers.routing.alternatives import distinct_routes
-from providers.routing.base import LatLon, RouteCandidate, times_from_anchors
+from providers.routing.base import LatLon, RouteCandidate, Truck, times_from_anchors
 from providers.routing.osrm import OsrmRouting
 from providers.routing.tomtom import TomTomRouting
 from providers.weather.openmeteo import HORIZON_H, OpenMeteoWeather, _parse_location
@@ -22,7 +22,7 @@ DEPART = datetime(2026, 11, 9, 12, tzinfo=UTC)
 async def test_upstream_failures_never_show_the_request_url() -> None:
     respx.get(url__startswith="https://api.tomtom.com/").mock(return_value=httpx.Response(503))
     with pytest.raises(UpstreamError) as err:
-        await TomTomRouting("SECRET123").routes([LatLon(32.7, -96.8), LatLon(39.7, -105.0)], DEPART, 40_000, 0)
+        await TomTomRouting("SECRET123").routes([LatLon(32.7, -96.8), LatLon(39.7, -105.0)], DEPART, Truck(40_000), 0)
     assert err.value.status == 503 and "SECRET123" not in str(err.value) and err.value.__cause__ is None
 
 
@@ -66,7 +66,9 @@ async def test_tomtom_parses_multi_leg_route_without_duplicate_junction() -> Non
     route = respx.get(url__startswith="https://api.tomtom.com/routing/1/calculateRoute/").mock(
         return_value=httpx.Response(200, json=body)
     )
-    out = await TomTomRouting("k").routes([LatLon(40, -100), LatLon(40.1, -100), LatLon(40.2, -100)], DEPART, 40_000, 2)
+    out = await TomTomRouting("k").routes(
+        [LatLon(40, -100), LatLon(40.1, -100), LatLon(40.2, -100)], DEPART, Truck(40_000), 2
+    )
     assert len(out) == 1 and out[0].coords.shape == (3, 2)
     assert list(out[0].cum_drive_s) == pytest.approx([0, 150, 300], rel=1e-3)
     params = route.calls.last.request.url.params
@@ -81,7 +83,7 @@ async def test_tomtom_bad_request_is_not_retried() -> None:
         return_value=httpx.Response(400, json={"detailedError": {"message": "bad point"}})
     )
     with pytest.raises(UpstreamError, match="bad point"):
-        await TomTomRouting("k").routes([LatLon(0, 0), LatLon(1, 1)], DEPART, 0, 2)
+        await TomTomRouting("k").routes([LatLon(0, 0), LatLon(1, 1)], DEPART, Truck(0), 2)
     assert route.call_count == 1
 
 
@@ -98,7 +100,7 @@ async def test_osrm_parses_annotation_durations() -> None:
         ],
     }
     respx.get(url__startswith="https://router.project-osrm.org/").mock(return_value=httpx.Response(200, json=body))
-    out = await OsrmRouting().routes([LatLon(40, -100), LatLon(40.2, -100)], DEPART, 0, 2)
+    out = await OsrmRouting().routes([LatLon(40, -100), LatLon(40.2, -100)], DEPART, Truck(0), 2)
     assert list(out[0].cum_drive_s) == [0, 10, 30]
     assert out[0].coords[1].tolist() == [40.1, -100.0]
     assert not out[0].truck_aware
@@ -113,7 +115,7 @@ class _FakeRouting:
         self.calls = 0
 
     async def routes(
-        self, waypoints: Sequence[LatLon], depart_at: datetime, load_lb: float, alternatives: int
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
     ) -> list[RouteCandidate]:
         self.calls += 1
         pts = np.array([[w.lat, w.lon] for w in waypoints])
@@ -124,7 +126,7 @@ class _FakeRouting:
 
 async def test_duplicates_are_removed_and_via_points_fill_to_three() -> None:
     fake = _FakeRouting()
-    out = await distinct_routes(fake, LatLon(35.0, -100.0), LatLon(35.0, -94.0), DEPART, 40_000)
+    out = await distinct_routes(fake, LatLon(35.0, -100.0), LatLon(35.0, -94.0), DEPART, Truck(40_000))
     assert len(out) == 3
     assert fake.calls == 5  # 1 direct + 4 via-point attempts
     mids = sorted(float(r.coords[len(r.coords) // 2, 0]) for r in out)

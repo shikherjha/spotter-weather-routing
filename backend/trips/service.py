@@ -32,7 +32,7 @@ from engine.weather import WeatherGrid
 from providers import nws, osm_places
 from providers.nws import Alert, PointInfo
 from providers.osm_places import OnRoute
-from providers.routing import LatLon, RouteCandidate, get_routing_provider
+from providers.routing import LatLon, RouteCandidate, Truck, get_routing_provider
 from providers.routing.alternatives import distinct_routes
 from providers.weather import WeatherProvider, get_weather_provider
 from providers.weather.demo import DemoStormWeather, demo_alerts
@@ -65,13 +65,14 @@ class TripError(ValueError):
     """A problem with the request the user can fix (time, place, spacing); shown to them as is."""
 
 
-async def _routes(origin: LatLon, dest: LatLon, depart: datetime, load_lb: float) -> list[RouteCandidate]:
+async def _routes(origin: LatLon, dest: LatLon, depart: datetime, truck: Truck) -> list[RouteCandidate]:
     provider = get_routing_provider()
-    raw = f"{provider.name}|{origin}|{dest}|{depart.astimezone(UTC):%Y%m%d%H}|{round(load_lb, -3)}"
-    key = "routes:v1:" + hashlib.sha1(raw.encode()).hexdigest()
+    vehicle = f"{round(truck.load_lb, -3)}|{truck.height_ft}|{truck.hazmat}"
+    raw = f"{provider.name}|{origin}|{dest}|{depart.astimezone(UTC):%Y%m%d%H}|{vehicle}"
+    key = "routes:v2:" + hashlib.sha1(raw.encode()).hexdigest()
     if (hit := await cache.aget(key)) is not None:
         return list(hit)
-    routes = await distinct_routes(provider, origin, dest, depart, load_lb)
+    routes = await distinct_routes(provider, origin, dest, depart, truck)
     if routes:
         await cache.aset(key, routes, timeout=ROUTE_CACHE_S)
     return routes
@@ -212,7 +213,8 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
         raise TripError(f"Departure must be within {MAX_LEAD_DAYS} days: forecasts beyond that aren't decision-grade.")
 
     o, d = LatLon(req.origin.lat, req.origin.lon), LatLon(req.destination.lat, req.destination.lon)
-    cands = await _routes(o, d, datetime.fromtimestamp(depart_s, UTC), req.load_lb)
+    truck = Truck(req.load_lb, req.height_ft, req.hazmat)
+    cands = await _routes(o, d, datetime.fromtimestamp(depart_s, UTC), truck)
     if not cands:
         raise TripError("No truck route found between these places.")
     t_route = time.perf_counter()
@@ -248,6 +250,8 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
         departure=int(depart_s),
         origin_tz=origin_tz,
         load_lb=req.load_lb,
+        height_ft=req.height_ft,
+        hazmat=req.hazmat,
         interval_mi=req.interval_mi,
         wind_basis=req.wind_basis,
         hos=req.hos,

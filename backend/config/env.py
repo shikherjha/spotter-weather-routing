@@ -19,8 +19,10 @@ class AppEnv(BaseSettings):
     redis_url: str | None = None
     cors_allowed_origins: str = "http://localhost:5173"
 
-    routing_provider: Literal["tomtom", "osrm"] = "osrm"
+    routing_provider: Literal["valhalla", "tomtom", "osrm"] = "osrm"
     tomtom_api_key: SecretStr | None = None
+    valhalla_url: str | None = None
+    valhalla_token: SecretStr | None = None
 
     open_meteo_api_key: SecretStr | None = None
     weather_model: str = "ncep_nbm_conus"

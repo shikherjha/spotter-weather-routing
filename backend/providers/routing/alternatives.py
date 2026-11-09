@@ -18,7 +18,7 @@ from pyproj import Geod
 from engine.corridor import route_signature, shared_fraction
 from engine.geometry import METERS_PER_MILE, Polyline, haversine_mi, initial_bearing_deg
 from providers.http import UpstreamError
-from providers.routing.base import LatLon, RouteCandidate, RoutingProvider
+from providers.routing.base import LatLon, RouteCandidate, RoutingProvider, Truck
 
 log = logging.getLogger(__name__)
 _GEOD = Geod(ellps="WGS84")
@@ -65,9 +65,9 @@ def via_points(best: RouteCandidate, origin: LatLon, dest: LatLon) -> list[LatLo
 
 
 async def distinct_routes(
-    provider: RoutingProvider, origin: LatLon, dest: LatLon, depart_at: datetime, load_lb: float, want: int = 3
+    provider: RoutingProvider, origin: LatLon, dest: LatLon, depart_at: datetime, truck: Truck, want: int = 3
 ) -> list[RouteCandidate]:
-    first = await provider.routes([origin, dest], depart_at, load_lb, alternatives=want - 1)
+    first = await provider.routes([origin, dest], depart_at, truck, alternatives=want - 1)
     if not first:
         return []
     accepted: list[RouteCandidate] = []
@@ -76,7 +76,7 @@ async def distinct_routes(
         return accepted
 
     vias = via_points(accepted[0], origin, dest)
-    requests = [provider.routes([origin, v, dest], depart_at, load_lb, alternatives=0) for v in vias]
+    requests = [provider.routes([origin, v, dest], depart_at, truck, alternatives=0) for v in vias]
     if provider.name == "osrm":  # the public OSRM server allows about one request a second, so go in turn
         results: list[list[RouteCandidate] | BaseException] = []
         for req in requests:

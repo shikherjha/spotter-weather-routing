@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from providers.http import UpstreamError, fetch, json_or_error
-from providers.routing.base import LatLon, RouteCandidate
+from providers.routing.base import LatLon, RouteCandidate, Truck
 
 
 class OsrmRouting:
@@ -23,7 +23,7 @@ class OsrmRouting:
         self._base = base_url.rstrip("/")
 
     async def routes(
-        self, waypoints: Sequence[LatLon], depart_at: datetime, load_lb: float, alternatives: int
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
     ) -> list[RouteCandidate]:
         coords = ";".join(f"{w.lon:.6f},{w.lat:.6f}" for w in waypoints)
         params = {

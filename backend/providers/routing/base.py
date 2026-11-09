@@ -20,6 +20,22 @@ class LatLon:
         return f"{self.lat:.6f},{self.lon:.6f}"
 
 
+TARE_LB = 35_000  # empty tractor and 53 ft trailer
+
+
+@dataclass(frozen=True)
+class Truck:
+    """What the router needs to keep a truck off roads it can't use."""
+
+    load_lb: float
+    height_ft: float = 13.5  # a standard US van trailer
+    hazmat: bool = False
+
+    @property
+    def gross_lb(self) -> float:
+        return TARE_LB + self.load_lb
+
+
 @dataclass(frozen=True)
 class RouteCandidate:
     coords: FloatArray  # (N, 2) lat, lon
@@ -37,7 +53,7 @@ class RoutingProvider(Protocol):
     truck_aware: bool
 
     async def routes(
-        self, waypoints: Sequence[LatLon], depart_at: datetime, load_lb: float, alternatives: int
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
     ) -> list[RouteCandidate]: ...
 
 

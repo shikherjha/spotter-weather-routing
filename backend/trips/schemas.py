@@ -25,6 +25,8 @@ class TripRequest(BaseModel):
     destination: PlaceIn
     departure_local: datetime = Field(description="Wall-clock time at the origin; any offset is ignored")
     load_lb: float = Field(ge=0, le=120_000)
+    height_ft: float = Field(default=13.5, ge=8, le=16, description="Truck height; routes avoid lower clearances")
+    hazmat: bool = Field(default=False, description="Hazardous load; routes avoid roads and tunnels closed to it")
     interval_mi: Literal[10, 25, 50] = 25
     wind_basis: WindBasis = WindBasis.SUSTAINED
     hos: bool = Field(default=True, description="Apply FMCSA Hours-of-Service rest stops to ETAs")
@@ -212,6 +214,8 @@ class TripOut(BaseModel):
     departure: int
     origin_tz: str
     load_lb: float
+    height_ft: float = 13.5
+    hazmat: bool = False
     interval_mi: int
     wind_basis: WindBasis
     hos: bool

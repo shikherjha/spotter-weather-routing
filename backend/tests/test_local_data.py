@@ -1,0 +1,164 @@
+"""The data the worker keeps locally: NBM fields, the forecast copy, stops at truck stops, Valhalla routes."""
+
+import json
+from pathlib import Path
+
+import h3
+import numpy as np
+import pytest
+from shapely.geometry import box
+
+from engine.eta import HOUR, StopKind, plan_stops
+from providers.routing.valhalla import ValhallaRouting, decode_polyline6
+from providers.weather import local, nbm
+
+IDX = """1:0:d=2026110913:APCP:surface:0-1 hour acc fcst:prob >0.254:prob fcst 255/255
+2:100:d=2026110913:APCP:surface:0-1 hour acc fcst:
+3:200:d=2026110913:WIND:10 m above ground:1 hour fcst:
+4:300:d=2026110913:WIND:10 m above ground:1 hour fcst:10% level
+5:400:d=2026110913:WIND:30 m above ground:1 hour fcst:
+6:500:d=2026110913:ASNOW:surface:47-53 hour acc fcst:
+7:600:d=2026110913:TMP:2 m above ground:1 hour fcst:
+"""
+
+
+def test_idx_keeps_only_deterministic_fields_we_use() -> None:
+    msgs = nbm.parse_idx(IDX, "u")
+    got = [(m.var, m.start, m.end, m.hour, m.window) for m in msgs]
+    assert got == [
+        ("APCP", 100, 199, 1, 1),
+        ("WIND", 200, 299, 1, 0),
+        ("ASNOW", 500, 599, 53, 6),
+        ("TMP", 600, None, 1, 0),
+    ]
+
+
+def test_three_hourly_wind_is_interpolated_and_ends_at_the_last_hour() -> None:
+    hours = np.arange(1, 9)
+    out = nbm._instant({3: np.array([3.0]), 6: np.array([6.0])}, 1, hours)
+    assert np.isnan(out[0, :2]).all() and np.isnan(out[0, 6:]).all()
+    assert out[0, 2:6].tolist() == [3.0, 4.0, 5.0, 6.0]
+
+
+def test_totals_spread_over_their_window_and_hourly_ones_win() -> None:
+    hours = np.arange(1, 7)
+    six = (6, 6, np.array([6.0]))
+    one = (2, 1, np.array([5.0]))
+    out = nbm._totals([six, one], 1, hours)
+    assert out[0].tolist() == [1.0, 5.0, 1.0, 1.0, 1.0, 1.0]
+
+
+def test_rain_is_precipitation_minus_the_snows_water() -> None:
+    hours = np.arange(1, 2)
+    inst = {
+        "WIND": {1: np.array([1.0, 1.0, 1.0])},
+        "GUST": {1: np.array([2.0, 2.0, 2.0])},
+        "WDIR": {1: np.array([90.0, 90.0, 90.0])},
+        "TMP": {1: np.array([280.0, 270.0, 280.0])},  # warm, freezing, warm
+    }
+    precip_mm = np.array([25.4, 25.4, 25.4])  # 1 in of water at each point
+    snow_m = np.array([0.254, np.nan, np.nan])  # 10 in of snow at the first; no snow total elsewhere
+    acc = {"APCP": [(1, 1, precip_mm)], "ASNOW": [(1, 1, snow_m)]}
+    data = nbm._assemble(inst, acc, 3, hours).astype(float)
+    rain, snow = data[:, 3, 0], data[:, 4, 0]
+    assert rain == pytest.approx([0.0, 0.0, 1.0], abs=0.01)
+    assert snow == pytest.approx([10.0, 10.0, 0.0], abs=0.05)
+
+
+def _fake_run(root: Path, cells: list[str], run_s: int, values: np.ndarray) -> None:
+    folder = root / "runs" / "2026110913"
+    folder.mkdir(parents=True)
+    ids = np.array(sorted(h3.str_to_int(c) for c in cells), dtype=np.uint64)
+    np.save(folder / "cells.npy", ids)
+    np.save(folder / "forecast.npy", values.astype(np.float16))
+    hours = values.shape[2]
+    (folder / "meta.json").write_text(json.dumps({"run": run_s, "first": run_s + 3600, "hours": hours}))
+    (root / "current").write_text("2026110913")
+
+
+@pytest.fixture
+def _fresh_reader(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(local, "_loaded", None)
+    monkeypatch.setattr(local, "_checked_at", 0.0)
+
+
+@pytest.mark.usefixtures("_fresh_reader")
+async def test_local_forecast_reads_any_resolution_from_its_res6_cells(tmp_path: Path) -> None:
+    import time
+
+    run_s = int(time.time() // HOUR * HOUR - 2 * HOUR)
+    a, b = h3.latlng_to_cell(39.7, -105.0, 6), h3.latlng_to_cell(32.8, -96.8, 6)
+    ordered = sorted([a, b], key=h3.str_to_int)
+    values = np.zeros((2, 5, 4))
+    values[:, 0, :] = [[10.0], [20.0]]  # wind by cell, in sorted order
+    _fake_run(tmp_path, ordered, run_s, values)
+
+    reader = local.LocalForecast.open(tmp_path)
+    assert reader is not None
+    finer = h3.cell_to_children(ordered[1], 7)[0]
+    grid = await reader.grid([finer, ordered[0]])
+    assert grid.wind_mph[:, 0].tolist() == [20.0, 10.0]
+    assert grid.times[0] == run_s + HOUR
+
+
+@pytest.mark.usefixtures("_fresh_reader")
+def test_a_stale_copy_is_not_used(tmp_path: Path) -> None:
+    _fake_run(tmp_path, [h3.latlng_to_cell(39.7, -105.0, 6)], 1_000_000_000, np.zeros((1, 5, 2)))
+    assert local.LocalForecast.open(tmp_path) is None
+
+
+def test_grid_map_finds_the_point_nearest_each_cell() -> None:
+    g = {
+        "Nx": 2345.0,
+        "Ny": 1597.0,
+        "latitudeOfFirstGridPointInDegrees": 19.229,
+        "longitudeOfFirstGridPointInDegrees": 233.7234,
+        "LoVInDegrees": 265.0,
+        "Latin1InDegrees": 25.0,
+        "Latin2InDegrees": 25.0,
+        "DxInMetres": 2539.703,
+        "DyInMetres": 2539.703,
+        "radius": 6371200.0,
+    }
+    gm = nbm.build_grid_map(g, box(-105.1, 39.6, -104.9, 39.8))
+    assert len(gm.cells) > 10
+    assert gm.index.min() > 1_700_000 and gm.index.max() < 1_900_000  # Denver's rows, ~770 of 1597
+
+
+def test_stops_move_back_to_the_last_place_before_the_limit() -> None:
+    places = np.array([7.2, 7.9, 10.0, 18.5]) * HOUR
+    stops = plan_stops(30 * HOUR, places=places)
+    assert [(round(s.drive_s / HOUR, 1), s.kind, s.place) for s in stops[:3]] == [
+        (7.9, StopKind.BREAK, 1),
+        (10.0, StopKind.REST, 2),  # the 11-hour limit stays a rest even when taken early
+        (18.0, StopKind.BREAK, None),  # nothing in the 90 minutes before the limit
+    ]
+
+
+def test_polyline6_decodes() -> None:
+    assert decode_polyline6("_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI").tolist() == [
+        [38.5, -120.2],
+        [40.7, -120.95],
+        [43.252, -126.453],
+    ]
+
+
+def test_valhalla_times_follow_the_maneuvers() -> None:
+    leg = {
+        "shape": "_izlhA~rlgdF_{geC~ywl@_kwzCn`{nI",
+        "maneuvers": [{"time": 100.0, "end_shape_index": 1}, {"time": 50.0, "end_shape_index": 2}],
+    }
+    route = ValhallaRouting("http://x")._parse({"legs": [leg]})
+    assert route.cum_drive_s.tolist() == [0.0, 100.0, 150.0]
+
+
+def test_zone_index_finds_every_zone_a_point_is_in() -> None:
+    from providers.zones import Zone, ZoneIndex
+
+    zs = [Zone("COC071", "CO", "Las Animas", "counties"), Zone("COZ088", "CO", "Trinidad Vicinity", "zones")]
+    shapes = [box(-105.0, 37.0, -103.0, 37.6), box(-104.7, 37.0, -104.3, 37.3)]
+    index = ZoneIndex(zs, shapes, box(-110, 30, -100, 40))
+    inside, county_only, outside = index.at([(37.17, -104.5), (37.5, -103.5), (45.0, -90.0)])
+    assert inside is not None and inside.zones == {"COC071", "COZ088"} and inside.county == "Las Animas County, CO"
+    assert county_only is not None and county_only.zones == {"COC071"}
+    assert outside is None

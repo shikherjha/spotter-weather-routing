@@ -15,7 +15,7 @@ from django.test import AsyncClient
 from engine.units import HOUR
 from engine.weather import WeatherGrid
 from providers.nws import Alert, PointInfo
-from providers.routing.base import LatLon, RouteCandidate
+from providers.routing.base import LatLon, RouteCandidate, Truck
 from trips import service
 from trips import warnings as trip_warnings
 from trips.schemas import PlaceIn, TripOut, TripRequest
@@ -32,7 +32,7 @@ class _ThreeRoutes:
     name, truck_aware = "fake", True
 
     async def routes(
-        self, waypoints: Sequence[LatLon], depart_at: datetime, load_lb: float, alternatives: int
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
     ) -> list[RouteCandidate]:
         o, d = waypoints[0], waypoints[-1]
         out = []

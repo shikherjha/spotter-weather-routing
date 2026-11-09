@@ -14,10 +14,10 @@ import httpx
 import numpy as np
 
 from providers.http import UpstreamError, fetch, json_or_error
-from providers.routing.base import LatLon, RouteCandidate, times_from_anchors
+from providers.routing.base import LatLon, RouteCandidate, Truck, times_from_anchors
 
 LB_TO_KG = 0.45359237
-TARE_LB = 35_000  # empty tractor and 53 ft trailer; TomTom's vehicleWeight is the gross weight
+FT_TO_M = 0.3048
 BASE_URL = "https://api.tomtom.com/routing/1/calculateRoute"
 
 
@@ -29,19 +29,22 @@ class TomTomRouting:
         self._key = api_key
 
     async def routes(
-        self, waypoints: Sequence[LatLon], depart_at: datetime, load_lb: float, alternatives: int
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
     ) -> list[RouteCandidate]:
         params: dict[str, Any] = {
             "key": self._key,
             "travelMode": "truck",
             "vehicleCommercial": "true",
-            "vehicleWeight": round((TARE_LB + load_lb) * LB_TO_KG),
+            "vehicleWeight": round(truck.gross_lb * LB_TO_KG),  # gross, not just the load
+            "vehicleHeight": round(truck.height_ft * FT_TO_M, 2),
             "routeType": "fastest",
             "traffic": "false",  # departures are hours/days out; historic speeds are the honest choice
             "departAt": max(depart_at, datetime.now(UTC)).isoformat(timespec="seconds"),  # past times are rejected
             "routeRepresentation": "polyline",
             "extendedRouteRepresentation": ["distance", "travelTime"],
         }
+        if truck.hazmat:
+            params["vehicleLoadType"] = "otherHazmatGeneral"
         if alternatives and len(waypoints) == 2:
             params["maxAlternatives"] = alternatives
         url = f"{BASE_URL}/{':'.join(str(w) for w in waypoints)}/json"
