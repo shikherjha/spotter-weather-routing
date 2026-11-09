@@ -59,6 +59,14 @@ class StopOut(BaseModel):
     place_kind: Literal["truck_stop", "rest_area"] | None = None
 
 
+class RoutePlaceOut(BaseModel):
+    kind: Literal["truck_stop", "rest_area"]
+    name: str
+    mile: float
+    lat: float
+    lon: float
+
+
 class WeighStationOut(BaseModel):
     mile: float
     lat: float
@@ -123,6 +131,7 @@ class RouteOut(BaseModel):
     path_mi: list[float] = Field(description="Miles along the route at each path vertex")
     stops: list[StopOut]
     weigh_stations: list[WeighStationOut] = []
+    places: list[RoutePlaceOut] = Field(default=[], description="Truck stops and rest areas within a mile of the route")
     checkpoints: list[CheckpointOut]
     segments: list[SegmentOut]
     score: ScoreOut

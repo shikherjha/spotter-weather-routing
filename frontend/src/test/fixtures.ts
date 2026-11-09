@@ -43,6 +43,7 @@ export function route(id: string, levels: (Level | null)[], extra: Partial<Route
     path_mi: checkpoints.map((c) => c.mile),
     stops: [],
     weigh_stations: [],
+    places: [],
     checkpoints,
     segments: [],
     score: { miles_by_level: [0, 0, 0, 0, 0], unknown_mi: 0, no_travel_mi: 0, severe_mi: 0, high_mi: 0, avg_risk: 0 },

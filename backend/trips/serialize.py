@@ -160,6 +160,16 @@ def routes_out(
                 path_mi=path_mi,
                 stops=_stops(ev, places),
                 weigh_stations=_weigh(ev, weigh),
+                places=[
+                    s.RoutePlaceOut(
+                        kind=p.place.kind,  # type: ignore[arg-type]
+                        name=p.place.name,
+                        mile=round(p.mile, 1),
+                        lat=p.place.lat,
+                        lon=p.place.lon,
+                    )
+                    for p in places
+                ],
                 checkpoints=_checkpoints(ev),
                 segments=_segments(ev),
                 score=s.ScoreOut(

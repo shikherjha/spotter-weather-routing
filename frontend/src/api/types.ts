@@ -37,6 +37,14 @@ export interface Stop {
   place_kind: "truck_stop" | "rest_area" | null;
 }
 
+export interface RoutePlace {
+  kind: "truck_stop" | "rest_area";
+  name: string;
+  mile: number;
+  lat: number;
+  lon: number;
+}
+
 export interface WeighStation {
   mile: number;
   lat: number;
@@ -94,6 +102,7 @@ export interface Route {
   path_mi: number[];
   stops: Stop[];
   weigh_stations: WeighStation[];
+  places: RoutePlace[]; // truck stops and rest areas within a mile
   checkpoints: Checkpoint[];
   segments: Segment[];
   score: Score;
