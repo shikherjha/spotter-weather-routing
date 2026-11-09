@@ -6,14 +6,17 @@ import { leaveLater, routeStatus, shortArea, verdict, warningsOn } from "../lib/
 import { duration, longWhen } from "../lib/time";
 import { truckNote } from "../lib/truck";
 import { useUi } from "../state";
-import { AlertIcon, CheckIcon, ChevronIcon, WarnIcon } from "./icons";
+import { AlertIcon, BackIcon, CheckIcon, ChevronIcon, WarnIcon } from "./icons";
 import { Shield } from "./ui";
 
-export function TripLine({ trip, onEdit }: { trip: Trip; onEdit: () => void }) {
+export function TripLine({ trip, onEdit, onBack }: { trip: Trip; onEdit: () => void; onBack: () => void }) {
   const note = truckNote(trip.height_ft, trip.hazmat);
   return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="num flex min-w-0 flex-col gap-0.5">
+    <div className="flex items-start gap-1.5">
+      <button type="button" aria-label="Back to search" onClick={onBack} className="-ml-2 grid size-9 shrink-0 place-items-center max-lg:size-11">
+        <BackIcon />
+      </button>
+      <div className="num flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
         <span className="truncate text-[15px] font-bold">
           {cityName(trip.origin.label)} → {cityName(trip.destination.label)}
         </span>
@@ -22,7 +25,7 @@ export function TripLine({ trip, onEdit }: { trip: Trip; onEdit: () => void }) {
           {note && ` · ${note}`}
         </span>
       </div>
-      <button type="button" onClick={onEdit} className="h-9 shrink-0 rounded-lg border border-rule px-3 text-sm font-semibold max-lg:h-11">
+      <button type="button" onClick={onEdit} className="h-9 shrink-0 rounded-lg border border-rule px-3 text-sm font-semibold max-lg:h-11 max-lg:rounded-full max-lg:border-0 max-lg:bg-tint">
         Edit
       </button>
     </div>
@@ -75,6 +78,39 @@ export function RouteList({ trip }: { trip: Trip }) {
               <span className={`flex-1 text-right text-sm font-semibold ${tone}`}>{status.text}</span>
               <span className="sr-only">{on ? ", show details" : ", pick this route"}</span>
               <ChevronIcon />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The phone's route list: three cards side by side. The first tap picks; tapping the picked one opens its stops. */
+export function RouteCards({ trip }: { trip: Trip }) {
+  const picked = routeById(trip, useUi((s) => s.selected)).id;
+  const select = useUi((s) => s.select);
+  const openPanel = useUi((s) => s.openPanel);
+  return (
+    <ul aria-label="Routes" className="m-0 grid list-none grid-cols-3 gap-1.5 p-0">
+      {trip.routes.map((r) => {
+        const on = r.id === picked;
+        const status = routeStatus(trip, r);
+        const tone = status.tone === "good" ? "text-accent" : status.tone === "bad" ? "text-severe" : "text-ink-2";
+        return (
+          <li key={r.id}>
+            <button
+              type="button"
+              aria-pressed={on}
+              onClick={() => (on ? openPanel("stops") : select(r.id))}
+              className={`flex h-full w-full flex-col items-start gap-0.5 rounded-xl border-[1.5px] px-2.5 py-2 text-left ${on ? "border-accent bg-tint" : "border-rule"}`}
+            >
+              <span className="flex items-center gap-1">
+                <Shield id={r.id} on={on} size={15} />
+                <span className="num text-[13px] font-bold whitespace-nowrap">{duration(r.duration_s)}</span>
+              </span>
+              <span className={`text-[13px] leading-[17px] font-semibold ${tone}`}>{status.text}</span>
+              <span className="sr-only">{on ? ", show its stops" : ", pick this route"}</span>
             </button>
           </li>
         );

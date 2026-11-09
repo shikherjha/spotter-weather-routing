@@ -1,9 +1,13 @@
 import { create } from "zustand";
 
-import type { Checkpoint } from "./api/types";
+import type { Checkpoint, Stop } from "./api/types";
 import type { Theme } from "./lib/risk";
 
 export type Panel = "stops" | "timeline" | null;
+
+/** Map layers a driver can switch on; the weather heatmap is `weatherOn`. */
+export type Layer = "warnings" | "truckStops" | "restAreas" | "weigh";
+const NO_LAYERS: Record<Layer, boolean> = { warnings: false, truckStops: false, restAreas: false, weigh: false };
 
 export interface Focus {
   routeId: string;
@@ -19,6 +23,9 @@ interface UiState {
   selected: string | null;
   panel: Panel;
   focus: Focus | null;
+  /** The break or rest whose card is open. */
+  stop: Stop | null;
+  layers: Record<Layer, boolean>;
   theme: Theme;
 
   setHour: (h: number) => void;
@@ -27,6 +34,8 @@ interface UiState {
   select: (routeId: string) => void;
   openPanel: (p: Panel) => void;
   setFocus: (f: Focus | null) => void;
+  openStop: (s: Stop | null) => void;
+  toggleLayer: (l: Layer) => void;
   toggleTheme: () => void;
   resetView: () => void;
 }
@@ -41,6 +50,9 @@ export const useUi = create<UiState>((set) => ({
   selected: null,
   panel: null,
   focus: null,
+  stop: null,
+  // Home opens on today's warnings; a trip opens calm, on its answer.
+  layers: { ...NO_LAYERS, warnings: true },
   theme: initialTheme(),
 
   // Moving the time means you want to see the weather at that time.
@@ -49,7 +61,9 @@ export const useUi = create<UiState>((set) => ({
   setPlaying: (playing) => set((s) => ({ playing, weatherOn: playing || s.weatherOn })),
   select: (selected) => set((s) => (s.selected === selected ? {} : { selected, focus: null })),
   openPanel: (panel) => set({ panel, focus: null }),
-  setFocus: (focus) => set({ focus }),
+  setFocus: (focus) => set({ focus, stop: null }),
+  openStop: (stop) => set({ stop, focus: null }),
+  toggleLayer: (l) => set((s) => ({ layers: { ...s.layers, [l]: !s.layers[l] } })),
   toggleTheme: () =>
     set((s) => {
       const theme = s.theme === "light" ? "dark" : "light";
@@ -61,5 +75,6 @@ export const useUi = create<UiState>((set) => ({
       }
       return { theme };
     }),
-  resetView: () => set({ selected: null, hour: 0, weatherOn: false, playing: false, panel: null, focus: null }),
+  resetView: () =>
+    set({ selected: null, hour: 0, weatherOn: false, playing: false, panel: null, focus: null, stop: null, layers: NO_LAYERS }),
 }));

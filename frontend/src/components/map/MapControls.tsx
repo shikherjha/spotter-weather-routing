@@ -1,41 +1,69 @@
-import { useUi } from "../../state";
-import { CloudIcon, ThemeIcon } from "../icons";
+import type { CSSProperties } from "react";
 
-export function MapButtons() {
+import type { Trip } from "../../api/types";
+import { useUi, type Layer } from "../../state";
+import { ThemeIcon } from "../icons";
+
+type Chip = { key: Layer | "weather"; name: string; dot: string };
+
+// The dot on each switch is the marker it draws, so the switches double as the map's key.
+const CHIPS: Chip[] = [
+  { key: "weather", name: "Weather", dot: "rounded-full bg-[var(--risk-1)] border-[var(--risk-1)]" },
+  { key: "warnings", name: "Warnings", dot: "rounded-[2px] bg-[var(--severe)]/35 border-[var(--severe)]" },
+  { key: "truckStops", name: "Truck stops", dot: "rounded-[3px] bg-ink border-ink" },
+  { key: "restAreas", name: "Rest areas", dot: "rounded-[3px] bg-surface border-ink" },
+  { key: "weigh", name: "Weigh stations", dot: "rounded-full bg-surface border-ink" },
+];
+
+/** One switch per map layer. Weather needs a trip; the rest work anywhere. */
+export function LayerChips({ trip, className = "", style }: { trip: Trip | null; className?: string; style?: CSSProperties }) {
+  const layers = useUi((s) => s.layers);
+  const toggleLayer = useUi((s) => s.toggleLayer);
   const weatherOn = useUi((s) => s.weatherOn);
   const setWeather = useUi((s) => s.setWeather);
-  const theme = useUi((s) => s.theme);
-  const toggleTheme = useUi((s) => s.toggleTheme);
   return (
-    <div className="absolute top-6 right-6 z-10 flex gap-2 max-lg:top-2.5 max-lg:right-2.5">
-      <button
-        type="button"
-        aria-pressed={weatherOn}
-        onClick={() => setWeather(!weatherOn)}
-        className={`flex h-10 items-center gap-2 rounded-[10px] border border-rule px-3.5 text-sm font-semibold shadow-float max-lg:h-9 max-lg:px-3 ${weatherOn ? "bg-ink text-surface" : "bg-surface text-ink"}`}
-      >
-        <CloudIcon />
-        Weather
-      </button>
-      <button
-        type="button"
-        onClick={toggleTheme}
-        aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-        className="grid size-10 place-items-center rounded-[10px] border border-rule bg-surface text-ink shadow-float max-lg:size-9"
-      >
-        <ThemeIcon dark={theme === "dark"} />
-      </button>
-    </div>
+    <nav aria-label="Map layers" className={`flex gap-2 ${className}`} style={style}>
+      {CHIPS.map((c) => {
+        if (c.key === "weather" && !trip) return null;
+        const on = c.key === "weather" ? weatherOn : layers[c.key];
+        return (
+          <button
+            key={c.key}
+            type="button"
+            aria-pressed={on}
+            onClick={() => (c.key === "weather" ? setWeather(!weatherOn) : toggleLayer(c.key))}
+            className={`flex h-9 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold whitespace-nowrap shadow-float lg:h-[38px] ${
+              on ? "border-ink bg-ink text-surface" : "border-rule bg-surface text-ink"
+            }`}
+          >
+            <span aria-hidden="true" className={`size-2.5 border-[1.5px] ${c.dot} ${on ? "outline-[1.5px] outline-surface" : ""}`} />
+            {c.name}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
-/** What the map's dots mean; the risk colours are explained by the slider's legend. */
+export function ThemeButton({ className = "" }: { className?: string }) {
+  const theme = useUi((s) => s.theme);
+  const toggleTheme = useUi((s) => s.toggleTheme);
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+      className={`grid size-10 shrink-0 place-items-center rounded-[10px] border border-rule bg-surface text-ink shadow-float ${className}`}
+    >
+      <ThemeIcon dark={theme === "dark"} />
+    </button>
+  );
+}
+
+/** What the small dots on a route mean; everything else is labelled on the map or its switch. */
 export function MapKey() {
   return (
-    <div className="num absolute right-6 bottom-9 z-10 flex flex-col items-end gap-1 text-xs text-ink-2">
-      <span className="flex items-center gap-1.5 rounded bg-surface/85 px-1.5">
-        <span className="size-2.5 rounded-full border-2 border-surface bg-ink" /> Break or rest stop
-      </span>
+    <div className="num absolute right-6 bottom-9 z-10 text-xs text-ink-2">
       <span className="flex items-center gap-1.5 rounded bg-surface/85 px-1.5">
         <span className="size-2 rounded-full border-2 border-ink-2 bg-surface" /> Weather checked at each dot
       </span>

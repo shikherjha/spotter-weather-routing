@@ -183,3 +183,11 @@ body {
 .maplibregl-popup {
   z-index: 4;
 }
+
+/* Sideways-scrolling rows (the phone's layer switches) scroll without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

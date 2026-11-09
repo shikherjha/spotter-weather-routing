@@ -65,6 +65,7 @@ export function trip(routes: Route[], extra: Partial<Trip> = {}): Trip {
     load_lb: 42000,
     height_ft: 13.5,
     hazmat: false,
+    skip_places: [],
     interval_mi: 25,
     hos: true,
     forecast_issued: T0,

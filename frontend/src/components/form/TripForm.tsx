@@ -2,17 +2,14 @@ import { useState, type FormEvent } from "react";
 
 import { parseTrip } from "../../api/client";
 import { DEMO_WEATHER, type Place, type TripRequest } from "../../api/types";
+import { demoRequest } from "../../lib/demo";
 import { MAX_LOAD_LB, parseLoad } from "../../lib/load";
 import { nextHourInput } from "../../lib/time";
-import { DEFAULT_HEIGHT_FT, HEIGHTS_FT, feetInches } from "../../lib/truck";
+import { saveTruck, savedTruck } from "../../lib/truck";
 import { fieldBg, fieldClass } from "./fields";
 import { PlaceInput } from "./PlaceInput";
+import { TruckPill, type TruckFields } from "./TruckPill";
 
-const DEMO: Pick<TripRequest, "origin" | "destination" | "load_lb"> = {
-  origin: { label: "Dallas, Texas, United States", lat: 32.7767, lon: -96.797 },
-  destination: { label: "Denver, Colorado, United States", lat: 39.7392, lon: -104.9903 },
-  load_lb: 42000,
-};
 
 type FieldName = "origin" | "destination" | "departure" | "load" | "interval";
 
@@ -23,7 +20,7 @@ export function TripForm({
   onSubmit,
   onCancel,
 }: {
-  initial: TripRequest | null;
+  initial: Partial<TripRequest> | null;
   busy: boolean;
   error: string | null;
   onSubmit: (r: TripRequest) => void;
@@ -32,10 +29,15 @@ export function TripForm({
   const [origin, setOrigin] = useState<Place | null>(initial?.origin ?? null);
   const [destination, setDestination] = useState<Place | null>(initial?.destination ?? null);
   const [departure, setDeparture] = useState(initial?.departure_local ?? nextHourInput());
-  const [load, setLoad] = useState(initial ? String(initial.load_lb) : "40000");
+  const [truck, setTruck] = useState<TruckFields>(() => {
+    const saved = savedTruck();
+    return {
+      load: String(initial?.load_lb ?? saved.load_lb),
+      heightFt: initial?.height_ft ?? saved.height_ft,
+      hazmat: initial?.hazmat ?? saved.hazmat,
+    };
+  });
   const [spacing, setSpacing] = useState<TripRequest["interval_mi"]>(initial?.interval_mi ?? 25);
-  const [heightFt, setHeightFt] = useState(initial?.height_ft ?? DEFAULT_HEIGHT_FT);
-  const [hazmat, setHazmat] = useState(initial?.hazmat ?? false);
   const [hos, setHos] = useState(initial?.hos ?? true);
   const [demo, setDemo] = useState(initial?.weather === DEMO_WEATHER);
   const [problem, setProblem] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function TripForm({
         got.add("departure");
       }
       if (r.load_lb) {
-        setLoad(String(Math.round(r.load_lb)));
+        setTruck((t) => ({ ...t, load: String(Math.round(r.load_lb!)) }));
         got.add("load");
       }
       if (r.interval_mi) {
@@ -96,16 +98,18 @@ export function TripForm({
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (!origin || !destination) return setProblem("Pick a start and an end from the suggestions.");
-    const loadLb = parseLoad(load);
+    const loadLb = parseLoad(truck.load);
     if (!(loadLb > 0 && loadLb <= MAX_LOAD_LB)) return setProblem("Enter the load in pounds, between 1 and 120,000 (for example 42000 or 42k).");
     setProblem(null);
+    saveTruck({ load_lb: loadLb, height_ft: truck.heightFt, hazmat: truck.hazmat });
     onSubmit({
       origin,
       destination,
       departure_local: departure,
       load_lb: loadLb,
-      height_ft: heightFt,
-      hazmat,
+      height_ft: truck.heightFt,
+      hazmat: truck.hazmat,
+      skip_places: initial?.skip_places,
       interval_mi: spacing,
       hos,
       weather: demo ? DEMO_WEATHER : "live",
@@ -113,15 +117,14 @@ export function TripForm({
   };
 
   const tryDemo = () => {
-    setOrigin(DEMO.origin);
-    setDestination(DEMO.destination);
-    setLoad(String(DEMO.load_lb));
+    const req = demoRequest({ height_ft: truck.heightFt, hazmat: truck.hazmat });
+    setOrigin(req.origin);
+    setDestination(req.destination);
+    setTruck((t) => ({ ...t, load: String(req.load_lb) }));
+    setDeparture(req.departure_local);
     setDemo(true);
     setProblem(null);
-    // Leave on the next hour, Dallas time: the simulated storm is timed from then.
-    const leave = nextHourInput("America/Chicago");
-    setDeparture(leave);
-    onSubmit({ ...DEMO, departure_local: leave, height_ft: heightFt, hazmat, interval_mi: 25, hos: true, weather: DEMO_WEATHER });
+    onSubmit(req);
   };
 
   const message = problem ?? error;
@@ -193,60 +196,32 @@ export function TripForm({
         check={unsure.has("destination") ? "We couldn't find this place. Pick it from the suggestions." : null}
       />
 
-      <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-2.5">
-        <label className="flex flex-col gap-1">
-          <span className="text-[13px] font-semibold">Leave</span>
-          <input
-            type="datetime-local"
-            required
-            value={departure}
-            onChange={(e) => {
-              setDeparture(e.target.value);
-              touched("departure");
-            }}
-            className={`num ${fieldClass} px-2 ${fieldBg(filled.has("departure"))}`}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[13px] font-semibold">Load weight</span>
-          <span className="relative">
-            <input
-              inputMode="decimal"
-              value={load}
-              onChange={(e) => {
-                setLoad(e.target.value);
-                touched("load");
-              }}
-              className={`num ${fieldClass} pr-9 ${fieldBg(filled.has("load"))}`}
-            />
-            <span className="absolute top-3 right-3 text-sm text-ink-2">lb</span>
-          </span>
-        </label>
-      </div>
-      {unsure.has("departure") && (
-        <p className="-mt-2 mb-0 text-xs leading-[17px] font-semibold text-severe">Check the leave time: we weren't sure what you meant.</p>
-      )}
-      <p className="-mt-2 mb-0 text-xs leading-[17px] text-ink-2">
-        Leave time is local time where you start. Loads over 30,000 lb hit wind limits sooner.
-      </p>
+      <label className="flex flex-col gap-1">
+        <span className="text-[13px] font-semibold">Leave</span>
+        <input
+          type="datetime-local"
+          required
+          value={departure}
+          onChange={(e) => {
+            setDeparture(e.target.value);
+            touched("departure");
+          }}
+          className={`num ${fieldClass} px-2 ${fieldBg(filled.has("departure"))}`}
+        />
+        {unsure.has("departure") && (
+          <span className="text-xs leading-[17px] font-semibold text-severe">Check the leave time: we weren't sure what you meant.</span>
+        )}
+        <span className="text-xs leading-[17px] text-ink-2">Local time where you start.</span>
+      </label>
 
-      <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] items-end gap-2.5">
-        <label className="flex flex-col gap-1">
-          <span className="text-[13px] font-semibold">Truck height</span>
-          <select value={heightFt} onChange={(e) => setHeightFt(Number(e.target.value))} className={`num ${fieldClass} px-2 ${fieldBg(false)}`}>
-            {HEIGHTS_FT.map((h) => (
-              <option key={h} value={h}>
-                {feetInches(h)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex h-11 items-center gap-2.5">
-          <input type="checkbox" checked={hazmat} onChange={(e) => setHazmat(e.target.checked)} className="size-5 accent-[var(--accent)]" />
-          <span className="text-sm">Hazmat load</span>
-        </label>
-      </div>
-      <p className="-mt-2 mb-0 text-xs leading-[17px] text-ink-2">Routes stay off roads with lower bridges, weight limits or hazmat bans.</p>
+      <TruckPill
+        value={truck}
+        onChange={(t) => {
+          setTruck(t);
+          touched("load");
+        }}
+        tinted={filled.has("load")}
+      />
 
       <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
         <legend className="mb-1.5 p-0 text-[13px] font-semibold">Check the weather every</legend>

@@ -3,11 +3,12 @@
 import { PathStyleExtension, type PathStyleExtensionProps } from "@deck.gl/extensions";
 import type { PickingInfo } from "@deck.gl/core";
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
-import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, IconLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 
-import type { Checkpoint, Route, Stop, Trip, WeighStation } from "../../api/types";
+import type { AlertAreas, Checkpoint, Pois, Poi, Route, Trip, WeighStation } from "../../api/types";
 import { HEAT_ALPHA, RISK_RGB, THEME_RGB, type RGB, type Theme } from "../../lib/risk";
 import { slicePath } from "../../lib/route";
+import type { Layer } from "../../state";
 
 type RGBA = [number, number, number, number];
 const rgba = (c: RGB, a = 255): RGBA => [c[0], c[1], c[2], a];
@@ -35,7 +36,7 @@ export interface RouteHandlers {
   onCheckpoint: (routeId: string, cp: Checkpoint) => void;
 }
 
-/** Routes coloured by their own risk (picked route on top), checkpoints, stops, weigh stations and the two ends. */
+/** Routes coloured by their own risk (picked route on top), checkpoints, weigh stations and the two ends. */
 export function routeLayers(trip: Trip, picked: Route, theme: Theme, on: RouteHandlers) {
   const palette = RISK_RGB[theme];
   const ui = THEME_RGB[theme];
@@ -90,21 +91,8 @@ export function routeLayers(trip: Trip, picked: Route, theme: Theme, on: RouteHa
       pickable: true,
       onClick: (info: PickingInfo<Dot>) => info.object && on.onCheckpoint(info.object.routeId, info.object.cp),
     }),
-    new ScatterplotLayer<Stop>({
-      id: "stops",
-      data: picked.stops,
-      getPosition: (s) => [s.lon, s.lat],
-      getRadius: 6,
-      radiusUnits: "pixels",
-      getFillColor: rgba(ui.ink),
-      getLineColor: rgba(ui.halo),
-      getLineWidth: 2,
-      lineWidthUnits: "pixels",
-      stroked: true,
-      pickable: true,
-    }),
     new ScatterplotLayer<WeighStation>({
-      id: "weigh",
+      id: "route-weigh",
       data: picked.weigh_stations,
       getPosition: (w) => [w.lon, w.lat],
       getRadius: 4,
@@ -164,5 +152,69 @@ export function positionLayer(at: [number, number] | null, theme: Theme) {
     getLineWidth: 2.5,
     lineWidthUnits: "pixels",
     stroked: true,
+  });
+}
+
+const css = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
+const square = (fill: RGB, stroke: RGB) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect x="3" y="3" width="18" height="18" rx="4" fill="${css(fill)}" stroke="${css(stroke)}" stroke-width="4"/></svg>`,
+  )}`;
+
+/** Truck stops (filled squares), rest areas (open squares) and weigh stations (open circles) across the US. */
+export function placeLayers(pois: Pois | undefined, on: Record<Layer, boolean>, theme: Theme) {
+  const ui = THEME_RGB[theme];
+  const icon = (fill: RGB, stroke: RGB) => {
+    const url = square(fill, stroke);
+    return () => ({ url, id: url, width: 24, height: 24 });
+  };
+  // Sized in metres with pixel limits: small dots across a region, full-size markers when zoomed in.
+  const shared = {
+    getPosition: (p: Poi) => [p[1], p[0]] as [number, number],
+    getSize: 3000,
+    sizeUnits: "meters" as const,
+    sizeMinPixels: 5,
+    sizeMaxPixels: 12,
+    pickable: true,
+  };
+  return [
+    new IconLayer<Poi>({ id: "rest-areas", data: pois?.rest_area ?? [], visible: on.restAreas, getIcon: icon(ui.halo, ui.ink), ...shared }),
+    new IconLayer<Poi>({ id: "truck-stops", data: pois?.truck_stop ?? [], visible: on.truckStops, getIcon: icon(ui.ink, ui.halo), ...shared }),
+    new ScatterplotLayer<Poi>({
+      id: "weigh-stations",
+      data: pois?.weigh ?? [],
+      visible: on.weigh,
+      getPosition: shared.getPosition,
+      getRadius: 1500,
+      radiusUnits: "meters",
+      radiusMinPixels: 2.5,
+      radiusMaxPixels: 5,
+      getFillColor: rgba(ui.halo),
+      getLineColor: rgba(ui.ink),
+      getLineWidth: 1.5,
+      lineWidthUnits: "pixels",
+      stroked: true,
+      pickable: true,
+    }),
+  ];
+}
+
+type AlertFeature = AlertAreas["features"][number];
+
+/** Active NWS warnings (stronger) and advisories or watches (lighter), US-wide. */
+export function warningLayer(areas: AlertAreas | undefined, visible: boolean, theme: Theme) {
+  const [warn, advise] = [RISK_RGB[theme][3], RISK_RGB[theme][2]];
+  return new GeoJsonLayer<AlertFeature["properties"]>({
+    id: "warnings",
+    data: (areas?.features ?? []) as never,
+    visible,
+    filled: true,
+    stroked: true,
+    getFillColor: (f) => (f.properties.kind === "warning" ? rgba(warn, 56) : rgba(advise, 40)),
+    getLineColor: (f) => (f.properties.kind === "warning" ? rgba(warn, 150) : rgba(advise, 140)),
+    lineWidthUnits: "pixels",
+    getLineWidth: 1,
+    pickable: true,
+    updateTriggers: { getFillColor: theme, getLineColor: theme },
   });
 }

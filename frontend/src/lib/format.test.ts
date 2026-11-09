@@ -4,6 +4,7 @@ import { T0, checkpoint } from "../test/fixtures";
 import { parseLoad } from "./load";
 import { levelReason } from "./risk";
 import { duration, relativeToNow, sameDay, when } from "./time";
+import { pillLabel, stopLabel } from "./stops";
 import { truckNote } from "./truck";
 
 describe("time", () => {
@@ -53,5 +54,16 @@ describe("truck note", () => {
     expect(truckNote(13.5, false)).toBe("");
     expect(truckNote(14, true)).toBe("14′ 0″ tall · Hazmat");
     expect(truckNote(12.5, false)).toBe("12′ 6″ tall");
+  });
+});
+
+describe("stop labels", () => {
+  const stop = { mile: 0, lat: 0, lon: 0, arrive: 0, depart: 0, tz: "UTC" };
+  it("names the place and town, and falls back gracefully", () => {
+    expect(stopLabel({ ...stop, kind: "break", place: "Love's", place_kind: "truck_stop", town: "Dalhart, TX" })).toBe("30-min break at Love's, Dalhart, TX");
+    expect(stopLabel({ ...stop, kind: "rest", place: "Rest area", place_kind: "rest_area", town: "Raton, NM" })).toBe("10-h rest at a rest area near Raton, NM");
+    expect(stopLabel({ ...stop, kind: "rest", place: null, place_kind: null, town: "Raton, NM" })).toBe("10-h rest near Raton, NM");
+    expect(stopLabel({ ...stop, kind: "rest", place: null, place_kind: null, town: null })).toBe("10-h rest");
+    expect(pillLabel({ ...stop, kind: "rest", place: "TA", place_kind: "truck_stop", town: "Pueblo, CO" })).toBe("TA, Pueblo");
   });
 });

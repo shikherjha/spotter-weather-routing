@@ -17,9 +17,28 @@ export interface TripRequest {
   load_lb: number;
   height_ft: number;
   hazmat: boolean;
+  skip_places?: [number, number][]; // (lat, lon) of truck stops the driver won't use
   interval_mi: 10 | 25 | 50;
   hos: boolean;
   weather: "live" | typeof DEMO_WEATHER;
+}
+
+/** One truck stop, rest area or weigh station on the map: [lat, lon, name] (GET /api/pois). */
+export type Poi = [number, number, string];
+export interface Pois {
+  truck_stop: Poi[];
+  rest_area: Poi[];
+  weigh: Poi[];
+}
+
+/** The national map of active NWS warnings and advisories (GET /api/alerts). */
+export interface AlertAreas {
+  updated: number | null;
+  features: {
+    type: "Feature";
+    properties: { event: string; kind: "warning" | "advisory"; area: string; ends: number | null };
+    geometry: GeoJSON.Geometry;
+  }[];
 }
 
 /** Request value and returned weather_model of the simulated demo storm. */
@@ -35,6 +54,7 @@ export interface Stop {
   tz: string;
   place: string | null; // the truck stop or rest area it's planned at
   place_kind: "truck_stop" | "rest_area" | null;
+  town: string | null;
 }
 
 export interface RoutePlace {
@@ -52,6 +72,7 @@ export interface WeighStation {
   name: string;
   eta: number;
   tz: string;
+  town: string | null;
 }
 
 export interface Checkpoint {
@@ -168,6 +189,7 @@ export interface Trip {
   load_lb: number;
   height_ft: number;
   hazmat: boolean;
+  skip_places: [number, number][];
   interval_mi: 10 | 25 | 50;
   hos: boolean;
   forecast_issued: number;

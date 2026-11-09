@@ -75,3 +75,40 @@ export function ThemeIcon({ dark }: { dark: boolean }) {
     </svg>
   );
 }
+
+export function TruckIcon() {
+  return (
+    <svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
+      <rect x="1" y="2" width="13" height="9" rx="1" />
+      <path d="M14 5 H18 L21 8.5 V11 H14" />
+      <circle cx="5" cy="13" r="1.8" />
+      <circle cx="17" cy="13" r="1.8" />
+    </svg>
+  );
+}
+
+export function SearchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" className="shrink-0">
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M12 12 L16 16" />
+    </svg>
+  );
+}
+
+export function ClockIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" fill="none" stroke="var(--ink-2)" strokeWidth="1.5" className="shrink-0">
+      <circle cx="9" cy="9" r="7" />
+      <path d="M9 5 V9 L12 11" />
+    </svg>
+  );
+}
+
+export function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M10 3 L5 8 L10 13" />
+    </svg>
+  );
+}

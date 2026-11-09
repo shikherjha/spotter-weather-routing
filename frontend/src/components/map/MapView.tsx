@@ -1,24 +1,29 @@
 import type { PickingInfo } from "@deck.gl/core";
 import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import MapGL, { Marker, Popup, useControl, type MapRef } from "react-map-gl/maplibre";
 
-import type { Stop, Trip, WeighStation } from "../../api/types";
+import { getAlerts, getPois } from "../../api/client";
+import type { AlertAreas, Poi, Stop, Trip, WeighStation } from "../../api/types";
 import { heatmapRisk } from "../../lib/heatmap";
 import { LEVEL_NAMES, mainReading } from "../../lib/risk";
 import { mileAt, pointAtMile, routeById, tripHours } from "../../lib/route";
 import { troubleSpots, type Pin } from "../../lib/summary";
+import { pillChip, pillLabel, weighLabel } from "../../lib/stops";
 import { HOUR, when } from "../../lib/time";
 import { useUi } from "../../state";
 import { Shield } from "../ui";
 import { CheckpointCard } from "./CheckpointCard";
-import { heatLayer, positionLayer, routeLayers, type Dot } from "./layers";
+import { heatLayer, placeLayers, positionLayer, routeLayers, warningLayer, type Dot } from "./layers";
+import { StopCard } from "./StopCard";
 
 const STYLE = {
   light: "https://tiles.openfreemap.org/styles/positron",
   dark: "https://tiles.openfreemap.org/styles/dark",
 };
-const US_VIEW = { longitude: -98.5, latitude: 39.5, zoom: 3.6 };
+// The lower 48 in view: the desktop card covers the west, a phone is narrow.
+const usView = () => (window.innerWidth < 640 ? { longitude: -97, latitude: 38, zoom: 2.4 } : { longitude: -94, latitude: 39, zoom: 3.6 });
 const SHIELD_AT = 0.42; // fraction along each route: by then alternatives have usually split apart
 const MIN_VIEW_PX = 120; // padding never squeezes the visible map below this
 
@@ -35,22 +40,28 @@ const TIP_STYLE = {
 // Place names come from OpenStreetMap and NWS; the tooltip is HTML, so escape them.
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+const PLACE_KIND: Record<string, string> = { "truck-stops": "Truck stop", "rest-areas": "Rest area", "weigh-stations": "Weigh station" };
+
 function tipHtml({ object, layer }: PickingInfo<unknown>): string | null {
-  if (!object) return null;
-  if (layer?.id === "checkpoints") {
+  if (!object || !layer) return null;
+  if (layer.id === "checkpoints") {
     const { cp, routeId } = object as Dot;
     const where = cp.place ? ` near ${esc(cp.place)}` : "";
     const level = cp.level === null ? "No forecast yet" : `${LEVEL_NAMES[cp.level]} · ${mainReading(cp)}`;
     return `<strong>Route ${routeId}, mile ${Math.round(cp.mile)}${where}</strong><br/>${when(cp.eta, cp.tz)}<br/>${level}`;
   }
-  if (layer?.id === "stops") {
-    const st = object as Stop;
-    const what = st.kind === "break" ? "30-min break" : "10-h rest";
-    return `<strong>${what}${st.place ? ` at ${esc(st.place)}` : ""}</strong><br/>Mile ${Math.round(st.mile)} · ${when(st.arrive, st.tz)}`;
-  }
-  if (layer?.id === "weigh") {
+  if (layer.id === "route-weigh") {
     const w = object as WeighStation;
-    return `<strong>${esc(w.name)}</strong><br/>Mile ${Math.round(w.mile)} · ${when(w.eta, w.tz)}`;
+    return `<strong>${esc(weighLabel(w))}</strong><br/>Mile ${Math.round(w.mile)} · ${when(w.eta, w.tz)}`;
+  }
+  if (layer.id in PLACE_KIND) {
+    const [, , name] = object as Poi;
+    const kind = PLACE_KIND[layer.id];
+    return name && name !== kind ? `<strong>${esc(name)}</strong><br/>${kind}` : `<strong>${kind}</strong>`;
+  }
+  if (layer.id === "warnings") {
+    const { event, area } = (object as AlertAreas["features"][number]).properties;
+    return `<strong>${esc(event)}</strong><br/>${esc(area.length > 90 ? `${area.slice(0, 90)}…` : area)}`;
   }
   return null;
 }
@@ -90,7 +101,17 @@ function bounds(trip: Trip): [[number, number], [number, number]] {
   ];
 }
 
-export function MapView({ trip, padding }: { trip: Trip | null; padding: Padding }) {
+export function MapView({
+  trip,
+  padding,
+  onSkipStop,
+  skipping = false,
+}: {
+  trip: Trip | null;
+  padding: Padding;
+  onSkipStop?: (s: Stop) => void;
+  skipping?: boolean;
+}) {
   const mapRef = useRef<MapRef>(null);
   const framedTrip = useRef<string | null>(null);
   const userMoved = useRef(false);
@@ -104,6 +125,14 @@ export function MapView({ trip, padding }: { trip: Trip | null; padding: Padding
   const setFocus = useUi((s) => s.setFocus);
   const setHour = useUi((s) => s.setHour);
   const openPanel = useUi((s) => s.openPanel);
+  const on = useUi((s) => s.layers);
+  const stop = useUi((s) => s.stop);
+  const openStop = useUi((s) => s.openStop);
+
+  // Fetched the first time a layer needs them; the place list is static, the warnings refresh each minute.
+  const placesWanted = on.truckStops || on.restAreas || on.weigh;
+  const pois = useQuery({ queryKey: ["pois"], queryFn: getPois, enabled: placesWanted, staleTime: Infinity });
+  const alerts = useQuery({ queryKey: ["alerts"], queryFn: getAlerts, enabled: on.warnings, staleTime: 60_000, refetchInterval: 120_000 });
 
   const picked = trip ? routeById(trip, selected) : null;
   const pins = useMemo(() => (trip ? troubleSpots(trip) : []), [trip]);
@@ -139,13 +168,19 @@ export function MapView({ trip, padding }: { trip: Trip | null; padding: Padding
     [trip, picked, theme, select, setFocus],
   );
 
+  const backdrop = useMemo(
+    () => [warningLayer(alerts.data, on.warnings, theme), ...placeLayers(pois.data, on, theme)],
+    [alerts.data, pois.data, on, theme],
+  );
+
   const layers = useMemo(() => {
-    if (!trip || !picked) return [];
+    if (!trip || !picked) return backdrop;
     const [h0, h1] = tripHours(trip, picked);
     const onRoad = weatherOn && hour >= h0 && hour <= h1;
     const here = onRoad ? pointAtMile(picked, mileAt(picked, trip.heatmap.start + hour * HOUR)) : null;
-    return [heatLayer(trip, heatmapRisk(trip.heatmap), cellIndex, hour, theme, weatherOn), ...routeLayerList, positionLayer(here, theme)];
-  }, [trip, picked, cellIndex, hour, theme, weatherOn, routeLayerList]);
+    const heat = heatLayer(trip, heatmapRisk(trip.heatmap), cellIndex, hour, theme, weatherOn);
+    return [heat, ...backdrop, ...routeLayerList, positionLayer(here, theme)];
+  }, [trip, picked, cellIndex, hour, theme, weatherOn, routeLayerList, backdrop]);
 
   const tooltip = (info: PickingInfo<unknown>) => {
     const html = tipHtml(info);
@@ -172,7 +207,7 @@ export function MapView({ trip, padding }: { trip: Trip | null; padding: Padding
       onMoveStart={(e) => {
         if ("originalEvent" in e && e.originalEvent) userMoved.current = true;
       }}
-      initialViewState={US_VIEW}
+      initialViewState={usView()}
       mapStyle={STYLE[theme]}
       style={{ width: "100%", height: "100%" }}
       attributionControl={{ compact: true }}
@@ -207,6 +242,26 @@ export function MapView({ trip, padding }: { trip: Trip | null; padding: Padding
           </div>
         </Marker>
       ))}
+
+      {picked?.stops.map((s) => (
+        <Marker key={`stop-${s.mile}`} longitude={s.lon} latitude={s.lat} anchor="left" onClick={onMarker(() => openStop(s))}>
+          <button
+            type="button"
+            aria-expanded={stop === s}
+            aria-label={`${pillChip(s)} stop: ${pillLabel(s)}`}
+            className={`num -ml-1.5 flex h-7 items-center gap-1.5 rounded-full border-2 border-surface bg-ink pr-2.5 pl-1 text-xs font-bold whitespace-nowrap text-surface shadow-float ${stop === s ? "ring-3 ring-accent" : ""}`}
+          >
+            <span className="rounded-full bg-surface px-1.5 leading-[18px] text-ink">{pillChip(s)}</span>
+            <span className="max-w-48 truncate">{pillLabel(s)}</span>
+          </button>
+        </Marker>
+      ))}
+
+      {stop && picked && (
+        <Popup longitude={stop.lon} latitude={stop.lat} offset={16} closeButton={false} closeOnClick={false} onClose={() => openStop(null)} maxWidth="330px">
+          <StopCard route={picked} stop={stop} onClose={() => openStop(null)} onSkip={(s) => onSkipStop?.(s)} skipping={skipping} />
+        </Popup>
+      )}
 
       {focus && trip && (
         <Popup

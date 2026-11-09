@@ -230,6 +230,7 @@ class TripOut(BaseModel):
     load_lb: float
     height_ft: float = 13.5
     hazmat: bool = False
+    skip_places: list[tuple[float, float]] = []
     interval_mi: int
     wind_basis: WindBasis
     hos: bool

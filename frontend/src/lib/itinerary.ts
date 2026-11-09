@@ -2,6 +2,7 @@
 import type { Level, Route, Trip } from "../api/types";
 import { levelReason, mainReading } from "./risk";
 import { placeLabel } from "./route";
+import { stopLabel, weighLabel } from "./stops";
 import { warningsOn } from "./summary";
 import { sameDay, when, zone, zoneName } from "./time";
 
@@ -55,11 +56,10 @@ export function itinerary(trip: Trip, r: Route, all: boolean): Row[] {
     });
   });
   for (const s of r.stops) {
-    const what = s.kind === "break" ? "30-min break" : "10-h rest";
     rows.push({
       key: `s${s.mile}`,
       mile: s.mile,
-      place: s.place ? `${what} at ${s.place}` : what,
+      place: stopLabel(s),
       time: `${when(s.arrive, s.tz)} → ${when(s.depart, s.tz, { day: !sameDay(s.arrive, s.depart, s.tz) })}`,
       weather: "",
       level: null,
@@ -71,7 +71,7 @@ export function itinerary(trip: Trip, r: Route, all: boolean): Row[] {
     rows.push({
       key: `g${w.mile}`,
       mile: w.mile,
-      place: w.name === "Weigh station" ? w.name : `Weigh station: ${w.name}`,
+      place: weighLabel(w),
       time: when(w.eta, w.tz),
       weather: "",
       level: null,

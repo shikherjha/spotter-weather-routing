@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { searchPlaces } from "../../api/client";
 import type { Place } from "../../api/types";
+import { SearchIcon } from "../icons";
 import { fieldBg, fieldClass } from "./fields";
 
 const SEARCH_DELAY_MS = 220;
@@ -14,6 +15,8 @@ export function PlaceInput({
   placeholder,
   tinted = false,
   check = null,
+  search = false,
+  autoFocus = false,
 }: {
   label: string;
   value: Place | null;
@@ -21,6 +24,9 @@ export function PlaceInput({
   placeholder: string;
   tinted?: boolean;
   check?: string | null;
+  /** The big "Where to?" box: label read out but not shown, a search icon, larger text. */
+  search?: boolean;
+  autoFocus?: boolean;
 }) {
   const id = useId();
   const [text, setText] = useState(value?.label ?? "");
@@ -65,10 +71,16 @@ export function PlaceInput({
 
   return (
     <div className="relative flex flex-col gap-1">
-      <label htmlFor={id} className="text-[13px] font-semibold">
+      <label htmlFor={id} className={search ? "sr-only" : "text-[13px] font-semibold"}>
         {label}
       </label>
+      {search && (
+        <span className="pointer-events-none absolute top-[17px] left-3.5 text-ink">
+          <SearchIcon />
+        </span>
+      )}
       <input
+        autoFocus={autoFocus}
         id={id}
         role="combobox"
         aria-expanded={open && options.length > 0}
@@ -93,7 +105,11 @@ export function PlaceInput({
           else return;
           e.preventDefault();
         }}
-        className={`${fieldClass} ${fieldBg(tinted)}`}
+        className={
+          search
+            ? "h-[52px] w-full rounded-xl border-[1.5px] border-ink bg-surface pr-3 pl-11 text-[17px] text-ink placeholder:text-ink-2"
+            : `${fieldClass} ${fieldBg(tinted)}`
+        }
       />
       {check && <span className="text-xs font-semibold text-severe">{check}</span>}
       {open && options.length > 0 && (

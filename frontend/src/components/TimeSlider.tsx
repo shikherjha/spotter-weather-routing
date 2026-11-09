@@ -40,6 +40,38 @@ export function TimeSlider({ trip, compact = false }: { trip: Trip; compact?: bo
     setPlaying(!playing);
   };
 
+  const track = (
+    <div className="relative h-11 min-w-0 flex-1">
+      <span aria-hidden="true" className="absolute inset-x-0 top-[13px] h-1.5 rounded-full bg-rule" />
+      <span
+        aria-hidden="true"
+        className="absolute top-[13px] h-1.5 bg-[var(--accent-soft)]"
+        style={{ left: pct(h0), width: `calc(${pct(h1)} - ${pct(h0)})` }}
+      />
+      <input
+        id="forecast-hour"
+        type="range"
+        min={0}
+        max={last}
+        step={1}
+        value={hour}
+        onChange={(e) => setHour(Number(e.target.value))}
+        aria-valuetext={`${when(at, trip.origin_tz)}, ${relativeToNow(at)}`}
+        className="time-range absolute inset-x-0 top-1.5 m-0 h-5 w-full"
+      />
+      <div aria-hidden="true" className="num pointer-events-none absolute inset-x-0 top-7 text-xs text-ink-2">
+        <span className="absolute left-0">{tick(start, trip.origin_tz, true)}</span>
+        {!compact && h0 < last - 4 && (
+          <span className="absolute font-semibold text-accent" style={{ left: `max(4.5rem, ${pct(h0)})` }}>
+            Your trip
+          </span>
+        )}
+        <span className="absolute left-1/2 -translate-x-1/2 max-md:hidden">{tick(start + (last / 2) * HOUR, trip.origin_tz, true)}</span>
+        <span className="absolute right-0">{tick(start + last * HOUR, trip.origin_tz, true)}</span>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-2.5">
       {weatherOn && (
@@ -62,40 +94,26 @@ export function TimeSlider({ trip, compact = false }: { trip: Trip; compact?: bo
         >
           <PlayIcon playing={playing} />
         </button>
-        <label htmlFor="forecast-hour" className="num flex w-[150px] shrink-0 flex-col max-md:w-auto">
-          <span className="text-xs text-ink-2">{weatherOn ? "Weather at" : "Weather"}</span>
-          <span className="text-[15px] font-bold">{when(at, trip.origin_tz)}</span>
-          <span className="text-xs text-ink-2">{relativeToNow(at)}</span>
-        </label>
-        <div className="relative h-11 min-w-0 flex-1">
-          <span aria-hidden="true" className="absolute inset-x-0 top-[13px] h-1.5 rounded-full bg-rule" />
-          <span
-            aria-hidden="true"
-            className="absolute top-[13px] h-1.5 bg-[var(--accent-soft)]"
-            style={{ left: pct(h0), width: `calc(${pct(h1)} - ${pct(h0)})` }}
-          />
-          <input
-            id="forecast-hour"
-            type="range"
-            min={0}
-            max={last}
-            step={1}
-            value={hour}
-            onChange={(e) => setHour(Number(e.target.value))}
-            aria-valuetext={`${when(at, trip.origin_tz)}, ${relativeToNow(at)}`}
-            className="time-range absolute inset-x-0 top-1.5 m-0 h-5 w-full"
-          />
-          <div aria-hidden="true" className="num pointer-events-none absolute inset-x-0 top-7 text-xs text-ink-2">
-            <span className="absolute left-0">{tick(start, trip.origin_tz, true)}</span>
-            {!compact && h0 < last - 4 && (
-              <span className="absolute font-semibold text-accent" style={{ left: `max(4.5rem, ${pct(h0)})` }}>
-                Your trip
+        {compact ? (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <label htmlFor="forecast-hour" className="num truncate text-[13px]">
+              <strong>{weatherOn ? "Weather at" : "Weather"}</strong>{" "}
+              <span className="text-ink-2">
+                · {when(at, trip.origin_tz)}, {relativeToNow(at).toLowerCase()}
               </span>
-            )}
-            <span className="absolute left-1/2 -translate-x-1/2 max-md:hidden">{tick(start + (last / 2) * HOUR, trip.origin_tz, true)}</span>
-            <span className="absolute right-0">{tick(start + last * HOUR, trip.origin_tz, true)}</span>
+            </label>
+            {track}
           </div>
-        </div>
+        ) : (
+          <>
+            <label htmlFor="forecast-hour" className="num flex w-[150px] shrink-0 flex-col max-md:w-auto">
+              <span className="text-xs text-ink-2">{weatherOn ? "Weather at" : "Weather"}</span>
+              <span className="text-[15px] font-bold">{when(at, trip.origin_tz)}</span>
+              <span className="text-xs text-ink-2">{relativeToNow(at)}</span>
+            </label>
+            {track}
+          </>
+        )}
       </div>
     </div>
   );

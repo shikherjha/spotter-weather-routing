@@ -9,9 +9,9 @@ describe("stop-by-stop rows", () => {
     const levels: Level[] = Array.from({ length: 17 }, (_, i) => (i === 12 ? 3 : 0));
     const r = route("B", levels, {}, 50);
     r.stops = [
-      { mile: 480, lat: 0, lon: 0, kind: "break", arrive: T0 + 8 * H, depart: T0 + 8.5 * H, tz: "America/Denver", place: "Love's Travel Stop", place_kind: "truck_stop" },
+      { mile: 480, lat: 0, lon: 0, kind: "break", arrive: T0 + 8 * H, depart: T0 + 8.5 * H, tz: "America/Denver", place: "Love's", place_kind: "truck_stop", town: "Dalhart, TX" },
     ];
-    r.weigh_stations = [{ mile: 610, lat: 0, lon: 0, name: "Weigh station", eta: T0 + 10 * H, tz: "America/Denver" }];
+    r.weigh_stations = [{ mile: 610, lat: 0, lon: 0, name: "Weigh station", eta: T0 + 10 * H, tz: "America/Denver", town: "Trinidad, CO" }];
     const places = itinerary(trip([r], { interval_mi: 50 }), r, false).map((x) => x.place);
     expect(places).toEqual([
       "Dallas, TX",
@@ -20,11 +20,11 @@ describe("stop-by-stop rows", () => {
       "Mile 300",
       "Mile 400",
       "Into Mountain time",
-      "30-min break at Love's Travel Stop",
+      "30-min break at Love's, Dalhart, TX",
       "Mile 500",
       "Mile 550",
       "Mile 600",
-      "Weigh station",
+      "Weigh station near Trinidad, CO",
       "Mile 650",
       "Mile 700",
       "Denver, CO",
@@ -39,7 +39,7 @@ describe("stop-by-stop rows", () => {
 
   it("shows the day a rest ends when it ends on another day", () => {
     const r = route("B", [0, 0, 0]);
-    r.stops = [{ mile: 100, lat: 0, lon: 0, kind: "rest", arrive: T0 + 10 * H, depart: T0 + 20 * H, tz: "America/Chicago", place: null, place_kind: null }];
+    r.stops = [{ mile: 100, lat: 0, lon: 0, kind: "rest", arrive: T0 + 10 * H, depart: T0 + 20 * H, tz: "America/Chicago", place: null, place_kind: null, town: null }];
     expect(itinerary(trip([r]), r, false).find((x) => x.kind === "stop")?.time).toBe("Sat 10:00 PM CST → Sun 8:00 AM CST");
   });
 

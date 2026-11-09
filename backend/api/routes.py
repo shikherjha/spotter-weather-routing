@@ -5,7 +5,7 @@ from django.http import HttpRequest, HttpResponse
 from ninja import NinjaAPI, Query, Schema, Status
 from pydantic import Field
 
-from providers import nws
+from providers import nws, osm_places
 from providers.http import UpstreamError
 from providers.places import search_places
 from trips import schemas as s
@@ -57,6 +57,13 @@ async def alerts(request: HttpRequest, response: HttpResponse) -> dict[str, Any]
     """Every active NWS warning, advisory and watch in the US, as GeoJSON for the map."""
     response["Cache-Control"] = "public, max-age=60"
     return await nws.cached_areas() or {"type": "FeatureCollection", "updated": None, "features": []}
+
+
+@api.get("/pois")
+async def pois(request: HttpRequest, response: HttpResponse) -> dict[str, list[tuple[float, float, str]]]:
+    """Truck stops, rest areas and weigh stations across the US (OpenStreetMap), for the map's layers."""
+    response["Cache-Control"] = "public, max-age=86400"
+    return osm_places.for_map()
 
 
 @api.post("/parse", response=s.ParsedTripOut)

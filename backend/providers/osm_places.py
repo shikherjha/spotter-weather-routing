@@ -110,3 +110,12 @@ def along(line: Polyline, kind: str, max_off_mi: float) -> list[OnRoute]:
     miles = np.interp(along_deg, cum_deg, line.cum_mi)
     out = [OnRoute(p, float(m), float(o)) for p, m, o in zip(places, miles, off, strict=True) if o <= max_off_mi]
     return sorted(out, key=lambda r: r.mile)
+
+
+MAP_KINDS = ("truck_stop", "rest_area", "weigh")
+
+
+def for_map() -> dict[str, list[tuple[float, float, str]]]:
+    """Every truck stop, rest area and weigh station as (lat, lon, name), for the map's layers."""
+    kinds = _load()
+    return {k: [(p.lat, p.lon, p.name) for p in kinds[k].places] if k in kinds else [] for k in MAP_KINDS}

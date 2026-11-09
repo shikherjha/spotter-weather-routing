@@ -270,6 +270,7 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
         load_lb=req.load_lb,
         height_ft=req.height_ft,
         hazmat=req.hazmat,
+        skip_places=req.skip_places,
         interval_mi=req.interval_mi,
         wind_basis=req.wind_basis,
         hos=req.hos,
