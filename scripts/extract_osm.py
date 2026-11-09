@@ -2,9 +2,9 @@
 # requires-python = ">=3.12"
 # dependencies = ["osmium>=4.0"]
 # ///
-"""Pull the places a truck trip needs out of an OpenStreetMap extract (e.g. Geofabrik's us-latest).
+"""Pull the places a truck trip needs out of OpenStreetMap extracts (e.g. Geofabrik's US regions).
 
-    uv run scripts/extract_osm.py us-latest.osm.pbf backend/data/osm_places.csv.gz
+    uv run scripts/extract_osm.py backend/data/osm_places.csv.gz us-*-latest.osm.pbf
 
 Writes one row per place: kind, name, lat, lon, population.
   town         place=city|town, to name where a checkpoint is
@@ -13,7 +13,8 @@ Writes one row per place: kind, name, lat, lon, population.
   weigh        weigh stations (amenity=weighbridge, highway=weigh_station)
 
 Two passes: tags are filtered in C++, then only the nodes that outline the kept ways are read
-back for their locations, so the US extract runs in minutes without a full node index.
+back for their locations, so the US runs in minutes without a full node index. Places in
+two neighbouring extracts are merged like any other duplicate.
 """
 
 from __future__ import annotations
@@ -76,7 +77,12 @@ def population(tags: osmium.osm.TagList) -> int:
     return int(digits) if digits else 0
 
 
-def main(src: str, dst: str) -> None:
+def main(dst: str, srcs: list[str]) -> None:
+    rows = [row for src in srcs for row in extract(src)]
+    write(dst, merge(rows))
+
+
+def extract(src: str) -> list[tuple[str, str, float, float, int]]:
     rows: list[tuple[str, str, float, float, int]] = []
     ways: list[tuple[str, str, int, list[int]]] = []
     proc = osmium.FileProcessor(src, osmium.osm.NODE | osmium.osm.WAY).with_filter(osmium.filter.TagFilter(*TAGS))
@@ -97,16 +103,20 @@ def main(src: str, dst: str) -> None:
         pts = [where[r] for r in refs if r in where]
         if pts:
             rows.append((kind, name, sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts), pop))
-    write(dst, merge(rows))
+    return rows
 
 
 def merge(rows: list[tuple[str, str, float, float, int]]) -> list[tuple[str, str, float, float, int]]:
     """One row per place: drop a stop within MERGE_DEG of a kept one of the same kind (named rows first)."""
     kept: list[tuple[str, str, float, float, int]] = []
     seen: dict[tuple[str, int, int], list[tuple[float, float]]] = {}
+    seen_towns: set[tuple[str, str, float, float]] = set()
     generic = {"Rest area", "Weigh station", "Truck stop"}
     for row in sorted(rows, key=lambda r: (r[0], r[1] in generic or not r[1], -r[4])):
         kind, _, lat, lon, _ = row
+        if kind == "town" and (kind, row[1], round(lat, 2), round(lon, 2)) in seen_towns:
+            continue
+        seen_towns.add((kind, row[1], round(lat, 2), round(lon, 2)))
         if kind != "town":
             cell = (kind, int(lat / MERGE_DEG), int(lon / MERGE_DEG))
             near = [
@@ -131,4 +141,4 @@ def write(dst: str, rows: Iterable[tuple[str, str, float, float, int]]) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2:])

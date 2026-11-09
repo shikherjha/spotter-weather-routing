@@ -13,11 +13,11 @@ export interface Row {
   weather: string;
   level: Level | null;
   reason: string;
-  kind: "zone" | "warning" | "stop" | "point" | "end";
+  kind: "zone" | "warning" | "stop" | "weigh" | "point" | "end";
 }
 
 // At the same mile, a clock change or a warning boundary reads before the checkpoint it applies to.
-const ORDER: Record<Row["kind"], number> = { zone: 0, warning: 1, stop: 2, point: 3, end: 3 };
+const ORDER: Record<Row["kind"], number> = { zone: 0, warning: 1, stop: 2, weigh: 2, point: 3, end: 3 };
 const LANDMARK_EVERY_MI = 100; // compact mode still shows a checkpoint about this often
 
 /** Compact mode keeps the ends, stops, clock changes, warnings, any weather above Low, and a row every ~100 mi. */
@@ -55,15 +55,28 @@ export function itinerary(trip: Trip, r: Route, all: boolean): Row[] {
     });
   });
   for (const s of r.stops) {
+    const what = s.kind === "break" ? "30-min break" : "10-h rest";
     rows.push({
       key: `s${s.mile}`,
       mile: s.mile,
-      place: s.kind === "break" ? "30-min break" : "10-h rest",
+      place: s.place ? `${what} at ${s.place}` : what,
       time: `${when(s.arrive, s.tz)} → ${when(s.depart, s.tz, { day: !sameDay(s.arrive, s.depart, s.tz) })}`,
       weather: "",
       level: null,
       reason: s.kind === "break" ? "Required after 8 h driving" : "Required after 11 h driving",
       kind: "stop",
+    });
+  }
+  for (const w of r.weigh_stations) {
+    rows.push({
+      key: `g${w.mile}`,
+      mile: w.mile,
+      place: w.name === "Weigh station" ? w.name : `Weigh station: ${w.name}`,
+      time: when(w.eta, w.tz),
+      weather: "",
+      level: null,
+      reason: "Pull in if it's open",
+      kind: "weigh",
     });
   }
   for (const { warning, hit } of warningsOn(trip, r.id)) {

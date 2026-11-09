@@ -3,7 +3,7 @@ import { MapboxOverlay, type MapboxOverlayProps } from "@deck.gl/mapbox";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import MapGL, { Marker, Popup, useControl, type MapRef } from "react-map-gl/maplibre";
 
-import type { Trip } from "../../api/types";
+import type { Stop, Trip, WeighStation } from "../../api/types";
 import { heatmapRisk } from "../../lib/heatmap";
 import { LEVEL_NAMES, mainReading } from "../../lib/risk";
 import { mileAt, pointAtMile, routeById, tripHours } from "../../lib/route";
@@ -21,6 +21,39 @@ const STYLE = {
 const US_VIEW = { longitude: -98.5, latitude: 39.5, zoom: 3.6 };
 const SHIELD_AT = 0.42; // fraction along each route: by then alternatives have usually split apart
 const MIN_VIEW_PX = 120; // padding never squeezes the visible map below this
+
+
+const TIP_STYLE = {
+  background: "var(--surface)",
+  color: "var(--ink)",
+  font: "13px/18px 'Public Sans', system-ui",
+  padding: "8px 10px",
+  borderRadius: "8px",
+  boxShadow: "var(--shadow)",
+};
+
+// Place names come from OpenStreetMap and NWS; the tooltip is HTML, so escape them.
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+function tipHtml({ object, layer }: PickingInfo<unknown>): string | null {
+  if (!object) return null;
+  if (layer?.id === "checkpoints") {
+    const { cp, routeId } = object as Dot;
+    const where = cp.place ? ` near ${esc(cp.place)}` : "";
+    const level = cp.level === null ? "No forecast yet" : `${LEVEL_NAMES[cp.level]} · ${mainReading(cp)}`;
+    return `<strong>Route ${routeId}, mile ${Math.round(cp.mile)}${where}</strong><br/>${when(cp.eta, cp.tz)}<br/>${level}`;
+  }
+  if (layer?.id === "stops") {
+    const st = object as Stop;
+    const what = st.kind === "break" ? "30-min break" : "10-h rest";
+    return `<strong>${what}${st.place ? ` at ${esc(st.place)}` : ""}</strong><br/>Mile ${Math.round(st.mile)} · ${when(st.arrive, st.tz)}`;
+  }
+  if (layer?.id === "weigh") {
+    const w = object as WeighStation;
+    return `<strong>${esc(w.name)}</strong><br/>Mile ${Math.round(w.mile)} · ${when(w.eta, w.tz)}`;
+  }
+  return null;
+}
 
 export interface Padding {
   top: number;
@@ -114,22 +147,9 @@ export function MapView({ trip, padding }: { trip: Trip | null; padding: Padding
     return [heatLayer(trip, heatmapRisk(trip.heatmap), cellIndex, hour, theme, weatherOn), ...routeLayerList, positionLayer(here, theme)];
   }, [trip, picked, cellIndex, hour, theme, weatherOn, routeLayerList]);
 
-  const tooltip = ({ object, layer }: PickingInfo<Dot>) => {
-    if (!object || layer?.id !== "checkpoints") return null;
-    const { cp, routeId } = object;
-    const where = cp.place ? ` near ${cp.place}` : "";
-    const level = cp.level === null ? "No forecast yet" : `${LEVEL_NAMES[cp.level]} · ${mainReading(cp)}`;
-    return {
-      html: `<strong>Route ${routeId}, mile ${Math.round(cp.mile)}${where}</strong><br/>${when(cp.eta, cp.tz)}<br/>${level}`,
-      style: {
-        background: "var(--surface)",
-        color: "var(--ink)",
-        font: "13px/18px 'Public Sans', system-ui",
-        padding: "8px 10px",
-        borderRadius: "8px",
-        boxShadow: "var(--shadow)",
-      },
-    };
+  const tooltip = (info: PickingInfo<unknown>) => {
+    const html = tipHtml(info);
+    return html ? { html, style: TIP_STYLE } : null;
   };
 
   // Marker clicks must not reach the map, or the route line under the marker takes the click.

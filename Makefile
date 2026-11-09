@@ -1,4 +1,4 @@
-.PHONY: setup services backend frontend test lint typecheck check
+.PHONY: setup services backend worker frontend test lint typecheck check
 
 setup:  ## install all dependencies
 	cd backend && uv sync
@@ -9,6 +9,9 @@ services:  ## start Redis in Docker
 
 backend:  ## API on :8000 (ASGI, autoreload)
 	cd backend && uv run uvicorn config.asgi:application --reload --port 8000
+
+worker:  ## keeps the NOAA forecast copy and NWS zones and alerts fresh (first run ~2 min)
+	cd backend && uv run python manage.py worker
 
 frontend:  ## UI on :5173 (proxies /api to :8000)
 	cd frontend && npm run dev

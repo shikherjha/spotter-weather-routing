@@ -31,6 +31,8 @@ const requestFrom = (t: Trip): TripRequest => ({
   destination: t.destination,
   departure_local: localInput(t.departure, t.origin_tz),
   load_lb: t.load_lb,
+  height_ft: t.height_ft,
+  hazmat: t.hazmat,
   interval_mi: t.interval_mi,
   hos: t.hos,
   weather: t.weather_model === DEMO_WEATHER ? DEMO_WEATHER : "live",

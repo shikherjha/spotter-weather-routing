@@ -7,6 +7,9 @@ import { nextHourInput } from "../../lib/time";
 import { fieldBg, fieldClass } from "./fields";
 import { PlaceInput } from "./PlaceInput";
 
+const HEIGHTS_FT = [12.5, 13, 13.5, 14, 14.5, 15];
+const feetInches = (ft: number) => `${Math.floor(ft)}′ ${Math.round((ft % 1) * 12)}″`;
+
 const DEMO: Pick<TripRequest, "origin" | "destination" | "load_lb"> = {
   origin: { label: "Dallas, Texas, United States", lat: 32.7767, lon: -96.797 },
   destination: { label: "Denver, Colorado, United States", lat: 39.7392, lon: -104.9903 },
@@ -33,6 +36,8 @@ export function TripForm({
   const [departure, setDeparture] = useState(initial?.departure_local ?? nextHourInput());
   const [load, setLoad] = useState(initial ? String(initial.load_lb) : "40000");
   const [spacing, setSpacing] = useState<TripRequest["interval_mi"]>(initial?.interval_mi ?? 25);
+  const [heightFt, setHeightFt] = useState(initial?.height_ft ?? 13.5);
+  const [hazmat, setHazmat] = useState(initial?.hazmat ?? false);
   const [hos, setHos] = useState(initial?.hos ?? true);
   const [demo, setDemo] = useState(initial?.weather === DEMO_WEATHER);
   const [problem, setProblem] = useState<string | null>(null);
@@ -101,6 +106,8 @@ export function TripForm({
       destination,
       departure_local: departure,
       load_lb: loadLb,
+      height_ft: heightFt,
+      hazmat,
       interval_mi: spacing,
       hos,
       weather: demo ? DEMO_WEATHER : "live",
@@ -116,7 +123,7 @@ export function TripForm({
     // Leave on the next hour, Dallas time: the simulated storm is timed from then.
     const leave = nextHourInput("America/Chicago");
     setDeparture(leave);
-    onSubmit({ ...DEMO, departure_local: leave, interval_mi: 25, hos: true, weather: DEMO_WEATHER });
+    onSubmit({ ...DEMO, departure_local: leave, height_ft: heightFt, hazmat, interval_mi: 25, hos: true, weather: DEMO_WEATHER });
   };
 
   const message = problem ?? error;
@@ -224,6 +231,24 @@ export function TripForm({
       <p className="-mt-2 mb-0 text-xs leading-[17px] text-ink-2">
         Leave time is local time where you start. Loads over 30,000 lb hit wind limits sooner.
       </p>
+
+      <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] items-end gap-2.5">
+        <label className="flex flex-col gap-1">
+          <span className="text-[13px] font-semibold">Truck height</span>
+          <select value={heightFt} onChange={(e) => setHeightFt(Number(e.target.value))} className={`num ${fieldClass} px-2 ${fieldBg(false)}`}>
+            {HEIGHTS_FT.map((h) => (
+              <option key={h} value={h}>
+                {feetInches(h)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex h-11 items-center gap-2.5">
+          <input type="checkbox" checked={hazmat} onChange={(e) => setHazmat(e.target.checked)} className="size-5 accent-[var(--accent)]" />
+          <span className="text-sm">Hazmat load</span>
+        </label>
+      </div>
+      <p className="-mt-2 mb-0 text-xs leading-[17px] text-ink-2">Routes stay off roads with lower bridges, weight limits or hazmat bans.</p>
 
       <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
         <legend className="mb-1.5 p-0 text-[13px] font-semibold">Check the weather every</legend>

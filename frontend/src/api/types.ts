@@ -15,6 +15,8 @@ export interface TripRequest {
   destination: Place;
   departure_local: string; // wall-clock at the origin, "YYYY-MM-DDTHH:mm"
   load_lb: number;
+  height_ft: number;
+  hazmat: boolean;
   interval_mi: 10 | 25 | 50;
   hos: boolean;
   weather: "live" | typeof DEMO_WEATHER;
@@ -30,6 +32,17 @@ export interface Stop {
   kind: "break" | "rest";
   arrive: number;
   depart: number;
+  tz: string;
+  place: string | null; // the truck stop or rest area it's planned at
+  place_kind: "truck_stop" | "rest_area" | null;
+}
+
+export interface WeighStation {
+  mile: number;
+  lat: number;
+  lon: number;
+  name: string;
+  eta: number;
   tz: string;
 }
 
@@ -80,6 +93,7 @@ export interface Route {
   path: [number, number][]; // [lon, lat]
   path_mi: number[];
   stops: Stop[];
+  weigh_stations: WeighStation[];
   checkpoints: Checkpoint[];
   segments: Segment[];
   score: Score;
@@ -143,6 +157,8 @@ export interface Trip {
   departure: number;
   origin_tz: string;
   load_lb: number;
+  height_ft: number;
+  hazmat: boolean;
   interval_mi: 10 | 25 | 50;
   hos: boolean;
   forecast_issued: number;

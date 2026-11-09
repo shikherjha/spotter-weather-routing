@@ -5,7 +5,7 @@ import type { PickingInfo } from "@deck.gl/core";
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 
-import type { Checkpoint, Route, Stop, Trip } from "../../api/types";
+import type { Checkpoint, Route, Stop, Trip, WeighStation } from "../../api/types";
 import { HEAT_ALPHA, RISK_RGB, THEME_RGB, type RGB, type Theme } from "../../lib/risk";
 import { slicePath } from "../../lib/route";
 
@@ -35,7 +35,7 @@ export interface RouteHandlers {
   onCheckpoint: (routeId: string, cp: Checkpoint) => void;
 }
 
-/** Routes coloured by their own risk (picked route on top), checkpoints, stops and the two ends. */
+/** Routes coloured by their own risk (picked route on top), checkpoints, stops, weigh stations and the two ends. */
 export function routeLayers(trip: Trip, picked: Route, theme: Theme, on: RouteHandlers) {
   const palette = RISK_RGB[theme];
   const ui = THEME_RGB[theme];
@@ -101,6 +101,20 @@ export function routeLayers(trip: Trip, picked: Route, theme: Theme, on: RouteHa
       getLineWidth: 2,
       lineWidthUnits: "pixels",
       stroked: true,
+      pickable: true,
+    }),
+    new ScatterplotLayer<WeighStation>({
+      id: "weigh",
+      data: picked.weigh_stations,
+      getPosition: (w) => [w.lon, w.lat],
+      getRadius: 4,
+      radiusUnits: "pixels",
+      getFillColor: rgba(ui.halo),
+      getLineColor: rgba(ui.ink),
+      getLineWidth: 2,
+      lineWidthUnits: "pixels",
+      stroked: true,
+      pickable: true,
     }),
     new ScatterplotLayer<[number, number]>({
       id: "ends",
