@@ -77,8 +77,9 @@ More detail: [problem and decisions](docs/01-problem.md) · [research](docs/02-r
 
 ## Performance
 
-- New area, cold caches: ~8 s, mostly the three TomTom route requests. Same trip again: under 1 s; the forecast and NWS lookups are cached in Redis.
-- A full trip response is ~44 KB gzipped; the slider and charts never call the API.
+- New area, cold caches: about 2–3 s, most of it the three truck routes from Valhalla. Weather (~0.5 s), warnings and place names are local reads. Same trip again: about 0.5 s, from Redis.
+- With TomTom instead of Valhalla, routing alone takes 2–8 s; with Open-Meteo instead of the local forecast, weather takes 1–4 s.
+- A full trip response is ~50 KB gzipped; the slider and charts never call the API. The map's place layers (~85 KB) and warning outlines (~75 KB) load once, when switched on.
 - Moving the slider only recolours the heatmap layer; route geometry is built once per trip.
 
 ## Project layout
@@ -89,11 +90,11 @@ backend/                 Django 6 + Django Ninja (ASGI), Python 3.12, uv
   providers/             Valhalla/TomTom/OSRM routing, NBM copy and Open-Meteo weather, NWS zones and alerts,
                          OpenStreetMap places, Jev client, demo storm
   trips/                 the pipeline (service), response building, warnings, triage, typed-trip parser
-  api/                   HTTP endpoints (/trips, /places, /parse, /health) and the `worker` command
+  api/                   HTTP endpoints (/trips, /places, /parse, /alerts, /pois, /health) and the `worker` command
   data/                  truck stops, rest areas, weigh stations and towns from OpenStreetMap (ODbL)
 frontend/src/            React 19 + TypeScript, MapLibre + deck.gl, TanStack Query, zustand, Tailwind
   lib/                   plain-language summaries, itinerary rows, route geometry, time formatting
-  components/            answer card, map/, details/, form/, forecast slider
+  components/            home/, answer card, map/, details/, form/, the phone's bottom sheet, forecast slider
 scripts/                 extract_osm.py: rebuilds backend/data from Geofabrik's US extracts
 docs/                    problem, research and architecture notes
 ```
@@ -103,7 +104,7 @@ docs/                    problem, research and architecture notes
 Needs Python 3.12 with [uv](https://docs.astral.sh/uv/), Node 24 and Docker (for Redis).
 
 ```bash
-cp .env.example .env    # optional keys: TOMTOM_API_KEY (else OSRM), TYPESAFE_API_KEY (else keyword rules)
+cp .env.example .env    # optional: VALHALLA_URL or TOMTOM_API_KEY (else OSRM), TYPESAFE_API_KEY (else keyword rules)
 make setup              # uv sync + npm ci
 make services           # Redis in Docker
 make backend            # http://localhost:8000/api/docs
@@ -114,17 +115,21 @@ make check              # lint, types and tests, as CI runs them
 
 ## Tests and quality
 
-- **145 backend tests** (pytest, Hypothesis): every rule boundary, the HOS clock, ranking order and ties, the departure advisor, providers against mocked HTTP responses, warnings matching and triage fallbacks, the full pipeline offline, and that upstream errors never expose API keys.
-- **19 frontend tests** (Vitest) for the plain-language logic: verdicts, pins, stop rows, time zones.
+- **168 backend tests** (pytest, Hypothesis): every rule boundary, the HOS clock (including a property test that stops moved to truck stops never break the hours rules), ranking order and ties, the departure advisor, the NOAA field handling (time axes, overlapping totals, rain and snow), providers against mocked HTTP responses, the routing fallback, warnings matching and triage fallbacks, the full pipeline offline, and that upstream errors never expose API keys.
+- **27 frontend tests** (Vitest) for the plain-language logic: verdicts, pins, stop rows, stop labels, time zones, recent trips and the saved truck.
 - ruff, mypy (strict), oxlint and TypeScript run in CI on every push.
 
 ## Deployment
 
-- **API + Redis** on Railway, built from `backend/Dockerfile`. Keys live only in Railway's environment variables.
+- **API, worker and Redis** on Railway. One container (`backend/Dockerfile`, `start.sh`) runs the API and the data worker side by side so both use one volume at `/data` (`DATA_DIR`): the forecast copy (~365 MB per run, two kept), the NWS outlines and their index. The worker restarts if it exits; until its first sync finishes (~2 min), trips use Open-Meteo and api.weather.gov.
+- **Routing** on our own Valhalla server (AWS, us-east-1, next to Railway), built from Geofabrik's US extract in Docker ([valhalla-scripted](https://github.com/valhalla/valhalla/tree/master/docker)). The US tiles are ~20 GB; serving takes ~6 GB of memory. TomTom is the backup if it doesn't answer within 10 s.
 - **Frontend** on Vercel; `vercel.json` forwards `/api/*` to the Railway API, so the browser talks to one origin.
+- Keys and the Valhalla URL live only in Railway's environment variables. `backend/data/osm_places.csv.gz` is rebuilt with `scripts/extract_osm.py` when the map data should be refreshed.
 
 ## Limits and next steps
 
 - The frontend's API types are hand-written because `openapi-typescript` doesn't support TypeScript 7 yet.
 - There are no component tests yet; the logic the components show is tested in `lib/`.
+- OpenStreetMap's truck-stop, rest-area and weigh-station coverage is good on interstates and patchy elsewhere; there is no open source for truck parking availability or whether a weigh station is open.
+- The forecast copy covers the lower 48 (NOAA's CONUS grid); trips elsewhere use Open-Meteo's GFS.
 - Next: live traffic in route timing, push alerts when the forecast changes before departure, and a dispatcher view across many trucks.
