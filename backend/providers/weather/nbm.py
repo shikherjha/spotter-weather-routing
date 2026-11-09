@@ -51,7 +51,8 @@ MAX_GAP_H = 3  # ...with no gaps longer than NBM's 3-hourly steps...
 HOURLY_UNTIL_H = 36  # ...and every hour up to here (all NBM runs are hourly this far)
 SNOW_TO_WATER = 0.1  # 10 in of snow is about 1 in of water
 FREEZING_C = 0.5
-CONCURRENCY = 24
+CONCURRENCY = 24  # index requests at once
+FIELDS_AT_ONCE = 6  # fields downloaded and decoded at once: each holds a 3.7M-point grid in memory
 KEEP_RUNS = 2  # the previous run stays on disk for readers that still have it open
 
 MS_TO_MPH = 2.236936
@@ -329,16 +330,19 @@ async def sync(root: Path, area: BaseGeometry) -> Path | None:
     inst: dict[str, dict[int, np.ndarray]] = defaultdict(dict)
     acc: dict[str, list[tuple[int, int, np.ndarray]]] = defaultdict(list)
 
+    fields = asyncio.Semaphore(FIELDS_AT_ONCE)
+
     async def take(msg: Message) -> None:
         nonlocal grid
-        raw = await _download(msg, gate)
-        handle, values = await asyncio.to_thread(_decode, raw)
-        try:
-            if grid is None:
-                grid = await asyncio.to_thread(_grid_map, handle, root, area)
-        finally:
-            eccodes.codes_release(handle)
-        sampled = values[grid.index]
+        async with fields:  # only the ~227k sampled values outlive this block
+            raw = await _download(msg, gate)
+            handle, values = await asyncio.to_thread(_decode, raw)
+            try:
+                if grid is None:
+                    grid = await asyncio.to_thread(_grid_map, handle, root, area)
+            finally:
+                eccodes.codes_release(handle)
+            sampled = values[grid.index]
         if msg.window:
             acc[msg.var].append((msg.hour, msg.window, sampled))
         else:
