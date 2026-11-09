@@ -27,6 +27,9 @@ class TripRequest(BaseModel):
     load_lb: float = Field(ge=0, le=120_000)
     height_ft: float = Field(default=13.5, ge=8, le=16, description="Truck height; routes avoid lower clearances")
     hazmat: bool = Field(default=False, description="Hazardous load; routes avoid roads and tunnels closed to it")
+    skip_places: list[tuple[float, float]] = Field(
+        default=[], max_length=20, description="(lat, lon) of truck stops or rest areas the driver won't stop at"
+    )
     interval_mi: Literal[10, 25, 50] = 25
     wind_basis: WindBasis = WindBasis.SUSTAINED
     hos: bool = Field(default=True, description="Apply FMCSA Hours-of-Service rest stops to ETAs")
@@ -57,6 +60,7 @@ class StopOut(BaseModel):
     tz: str
     place: str | None = Field(default=None, description="The truck stop or rest area it's planned at")
     place_kind: Literal["truck_stop", "rest_area"] | None = None
+    town: str | None = None
 
 
 class RoutePlaceOut(BaseModel):
@@ -74,6 +78,7 @@ class WeighStationOut(BaseModel):
     name: str
     eta: int
     tz: str
+    town: str | None = None
 
 
 class CheckpointOut(BaseModel):

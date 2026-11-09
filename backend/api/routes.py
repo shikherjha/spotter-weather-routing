@@ -1,9 +1,11 @@
 import logging
+from typing import Any
 
 from django.http import HttpRequest, HttpResponse
 from ninja import NinjaAPI, Query, Schema, Status
 from pydantic import Field
 
+from providers import nws
 from providers.http import UpstreamError
 from providers.places import search_places
 from trips import schemas as s
@@ -48,6 +50,13 @@ async def health(request: HttpRequest) -> Health:
 async def places(request: HttpRequest, query: Query[PlacesQuery]) -> list[s.PlaceSuggestion]:
     found = await search_places(query.q)
     return [s.PlaceSuggestion(label=p.label, lat=p.lat, lon=p.lon) for p in found]
+
+
+@api.get("/alerts")
+async def alerts(request: HttpRequest, response: HttpResponse) -> dict[str, Any]:
+    """Every active NWS warning, advisory and watch in the US, as GeoJSON for the map."""
+    response["Cache-Control"] = "public, max-age=60"
+    return await nws.cached_areas() or {"type": "FeatureCollection", "updated": None, "features": []}
 
 
 @api.post("/parse", response=s.ParsedTripOut)

@@ -162,3 +162,39 @@ def test_zone_index_finds_every_zone_a_point_is_in() -> None:
     assert inside is not None and inside.zones == {"COC071", "COZ088"} and inside.county == "Las Animas County, CO"
     assert county_only is not None and county_only.zones == {"COC071"}
     assert outside is None
+
+
+def test_alert_areas_use_the_polygon_else_the_zones_and_drop_statements() -> None:
+    from providers import nws
+    from providers.zones import Zone, ZoneIndex
+
+    index = ZoneIndex([Zone("COZ088", "CO", "Trinidad", "zones")], [box(-105, 37, -104, 38)], box(-110, 30, -100, 40))
+
+    def alert(event: str, ugc: set[str], polygon: object = None) -> nws.Alert:
+        return nws.Alert(event, event, "Severe", "", "", "", "", "", 0.0, None, frozenset(ugc), polygon, None)  # type: ignore[arg-type]
+
+    areas = nws.alert_areas(
+        [
+            alert("Winter Storm Warning", {"COZ088"}),
+            alert("Wind Advisory", set(), box(-103, 37, -102, 38)),
+            alert("Special Weather Statement", {"COZ088"}),
+            alert("Gale Warning", {"ANZ330"}),  # marine: no land outline
+        ],
+        index,
+    )
+    assert [(f["properties"]["event"], f["properties"]["kind"]) for f in areas["features"]] == [
+        ("Winter Storm Warning", "warning"),
+        ("Wind Advisory", "advisory"),
+    ]
+
+
+def test_a_skipped_place_is_never_planned_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.geometry import Polyline
+    from providers.osm_places import OnRoute, Place
+    from trips import service
+
+    stops = [OnRoute(Place("truck_stop", n, 35.0, -100.0 - i, 0), 100.0 * i, 0.1) for i, n in enumerate(["A", "B"])]
+    monkeypatch.setattr(service.osm_places, "along", lambda line, kind, off: stops if kind == "truck_stop" else [])
+    line = Polyline.from_coords(np.array([[35.0, -100.0], [35.0, -102.0]]))
+    assert [p.place.name for p in service._stop_places(line, [])] == ["A", "B"]
+    assert [p.place.name for p in service._stop_places(line, [(35.0, -101.0)])] == ["A"]

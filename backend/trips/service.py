@@ -20,6 +20,7 @@ import h3
 import numpy as np
 from django.core.cache import cache
 
+from config.env import get_env
 from engine.advisor import DepartureAdvice, sweep_departures
 from engine.corridor import Corridor, build_corridor
 from engine.eta import DEFAULT_HOS, DriveProfile, TripClock
@@ -30,6 +31,7 @@ from engine.scoring import Ranking, rank
 from engine.units import HOUR
 from engine.weather import WeatherGrid
 from providers import nws, osm_places
+from providers import zones as zone_index
 from providers.nws import Alert, PointInfo
 from providers.osm_places import OnRoute
 from providers.routing import LatLon, RouteCandidate, Truck, get_routing_provider
@@ -58,6 +60,7 @@ from trips.warnings import route_warnings, sample_indices, spread
 log = logging.getLogger(__name__)
 
 ROUTE_LABELS = "ABCDE"
+SKIP_DEG = 0.002  # ~200 m: a skipped place matches the one the driver tapped
 COARSEST_SAMPLE_RES = 3  # corridor sampling gets coarser down to this before the trip is refused
 
 
@@ -78,10 +81,24 @@ async def _routes(origin: LatLon, dest: LatLon, depart: datetime, truck: Truck) 
     return routes
 
 
-def _stop_places(line: Polyline) -> list[OnRoute]:
-    """Truck stops and rest areas by the route, where breaks and rests can be planned."""
+def _stop_places(line: Polyline, skip: list[tuple[float, float]]) -> list[OnRoute]:
+    """Truck stops and rest areas by the route, where breaks and rests can be planned (minus any skipped)."""
     found = osm_places.along(line, "truck_stop", STOP_MAX_OFF_MI) + osm_places.along(line, "rest_area", STOP_MAX_OFF_MI)
-    return sorted(found, key=lambda p: p.mile)
+    kept = [
+        p
+        for p in found
+        if not any(abs(p.place.lat - a) < SKIP_DEG and abs(p.place.lon - b) < SKIP_DEG for a, b in skip)
+    ]
+    return sorted(kept, key=lambda p: p.mile)
+
+
+def _name_towns(routes: list[s.RouteOut]) -> None:
+    """The nearest town for every break, rest and weigh station, so they read as "Love's, Dalhart, TX"."""
+    named: list[s.StopOut | s.WeighStationOut] = [x for r in routes for x in r.stops]
+    named += [x for r in routes for x in r.weigh_stations]
+    index = zone_index.load(get_env().data_dir / "zones")
+    for item, town in zip(named, osm_places.nearest_towns([(x.lat, x.lon) for x in named], index), strict=True):
+        item.town = town
 
 
 def _weigh_stations(line: Polyline) -> list[OnRoute]:
@@ -115,7 +132,7 @@ def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest, w
         profile = DriveProfile(line.cum_mi, c.cum_drive_s)
         if not c.truck_aware:
             profile = profile.capped(TRUCK_MAX_MPH)
-        places = _stop_places(line)
+        places = _stop_places(line, req.skip_places)
         stop_places.append(places)
         places_mi = np.array([p.mile for p in places])
         clock = TripClock.build(depart_s, profile, hos=DEFAULT_HOS if req.hos else None, places_mi=places_mi)
@@ -232,6 +249,7 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
 
         done = await asyncio.to_thread(_compute, req, prep, grid)
         routes = routes_out(done.evals, cands, done.ranking, depart_s, prep.stop_places, prep.weigh_stations)
+        _name_towns(routes)
         warnings, warnings_status = await _warnings(
             routes, lookup, sampled, demo_alerts(demo.anchor_s) if demo else None
         )

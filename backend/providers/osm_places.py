@@ -66,13 +66,16 @@ def _load() -> dict[str, _Kind]:
         return _kinds
 
 
-def nearest_towns(coords: Sequence[tuple[float, float]], zones: ZoneIndex) -> list[str | None]:
-    """'Trinidad, CO' for the nearest town within TOWN_MAX_MI of each (lat, lon), else None."""
+def nearest_towns(coords: Sequence[tuple[float, float]], zones: ZoneIndex | None) -> list[str | None]:
+    """'Trinidad, CO' for the nearest town within TOWN_MAX_MI of each (lat, lon), else None.
+
+    Without the zone outlines a town's state isn't known, and it's named alone ("Trinidad").
+    """
     global _town_states
     towns = _load().get("town")
     if towns is None or not coords:
         return [None] * len(coords)
-    if _town_states is None:
+    if _town_states is None and zones is not None:
         found = zones.at([(p.lat, p.lon) for p in towns.places])
         _town_states = [z.state if z else "" for z in found]
     pts = shapely.points([lon for _, lon in coords], [lat for lat, _ in coords])
@@ -81,8 +84,8 @@ def nearest_towns(coords: Sequence[tuple[float, float]], zones: ZoneIndex) -> li
     for (lat, lon), k in zip(coords, idx.tolist(), strict=True):
         t = towns.places[k]
         far = float(haversine_mi(np.array([lat]), np.array([lon]), np.array([t.lat]), np.array([t.lon]))[0])
-        state = _town_states[k]
-        out.append(f"{t.name}, {state}" if far <= TOWN_MAX_MI and state else None)
+        state = _town_states[k] if _town_states else ""
+        out.append((f"{t.name}, {state}" if state else t.name) if far <= TOWN_MAX_MI else None)
     return out
 
 

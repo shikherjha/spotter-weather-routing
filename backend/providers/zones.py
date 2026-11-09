@@ -14,7 +14,7 @@ import logging
 import pickle
 import re
 import threading
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -123,7 +123,13 @@ class ZoneIndex:
     def __init__(self, zones: list[Zone], shapes: list[BaseGeometry], conus: BaseGeometry) -> None:
         self._zones = zones
         self._tree = shapely.STRtree(shapes)
+        self._by_code = {z.ugc: g for z, g in zip(zones, shapes, strict=True)}
         self.conus = conus
+
+    def outline(self, codes: Iterable[str]) -> BaseGeometry | None:
+        """The area covered by these zone codes, or None if none are known."""
+        found = [self._by_code[c] for c in codes if c in self._by_code]
+        return unary_union(found) if found else None
 
     def at(self, coords: Sequence[tuple[float, float]]) -> list[PointZones | None]:
         """Zones, county and state for each (lat, lon); None outside every NWS zone (offshore, abroad)."""

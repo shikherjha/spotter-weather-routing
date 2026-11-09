@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,6 +45,8 @@ MISS_TTL_S = 10 * 60
 ALERTS_TTL_S = 5 * 60
 NATIONWIDE_KEY = "nws:alerts:all:v1"
 NATIONWIDE_TTL_S = 10 * 60  # the worker refreshes it every minute; stale after missing ten
+AREAS_KEY = "nws:areas:v1"
+AREA_SIMPLIFY_DEG = 0.01  # ~1 km: plenty for a national map, a fraction of the size
 CONCURRENCY = 16
 
 
@@ -179,10 +182,46 @@ def _parse_all(data: dict[str, Any]) -> list[Alert]:
 
 
 async def refresh_nationwide() -> int:
-    """Fetch every active alert in the US into the cache (the worker calls this every minute)."""
+    """Fetch every active alert in the US into the cache, with their outlines for the map.
+
+    The worker calls this every minute, so trips and the map never wait on api.weather.gov.
+    """
     alerts = _parse_all(await _get("/alerts/active", {"status": "actual"}))
     await cache.aset(NATIONWIDE_KEY, alerts, timeout=NATIONWIDE_TTL_S)
+    if (index := zone_index.load(get_env().data_dir / "zones")) is not None:
+        areas = await asyncio.to_thread(alert_areas, alerts, index)
+        await cache.aset(AREAS_KEY, areas, timeout=NATIONWIDE_TTL_S)
     return len(alerts)
+
+
+def alert_kind(event: str) -> str | None:
+    """How the map shows an alert: warnings stronger than advisories and watches; statements not at all."""
+    if event.endswith("Warning"):
+        return "warning"
+    if event.endswith(("Advisory", "Watch")):
+        return "advisory"
+    return None
+
+
+def alert_areas(alerts: Sequence[Alert], index: zone_index.ZoneIndex) -> dict[str, Any]:
+    """GeoJSON of every warning, advisory and watch on land: its own polygon, else its zones' outline."""
+    features = []
+    for a in alerts:
+        kind = alert_kind(a.event)
+        area = a.polygon or index.outline(a.ugc)
+        if kind is None or area is None or area.is_empty:
+            continue
+        simple = shapely.set_precision(area.simplify(AREA_SIMPLIFY_DEG), 0.001)
+        if simple.is_empty:
+            continue
+        props = {"event": a.event, "kind": kind, "area": a.area, "ends": a.ends}
+        features.append({"type": "Feature", "properties": props, "geometry": shapely.geometry.mapping(simple)})
+    return {"type": "FeatureCollection", "updated": int(time.time()), "features": features}
+
+
+async def cached_areas() -> dict[str, Any] | None:
+    hit: dict[str, Any] | None = await cache.aget(AREAS_KEY)
+    return hit
 
 
 async def active_alerts(states: Sequence[str]) -> list[Alert]:
