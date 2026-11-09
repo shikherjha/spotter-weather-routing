@@ -164,3 +164,14 @@ def test_parse_alert_reads_the_nws_geojson_shape() -> None:
         }
     )
     assert a is not None and a.ugc == {"KSZ029"} and a.ends is not None and a.ends - a.starts == 8 * H
+
+
+async def test_the_nationwide_list_is_filtered_by_state() -> None:
+    from django.core.cache import cache
+
+    from providers import nws
+
+    await cache.aset(
+        nws.NATIONWIDE_KEY, [_alert(id="co", ugc=frozenset({"COZ088"})), _alert(id="tx", ugc=frozenset({"TXZ119"}))]
+    )
+    assert [a.id for a in await nws.active_alerts(["CO", "NM"])] == ["co"]

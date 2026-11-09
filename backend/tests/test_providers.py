@@ -198,3 +198,35 @@ async def test_open_meteo_batches_caches_and_falls_back_for_uncovered_cells() ->
 
     await wx.grid([covered, uncovered])  # served from cache
     assert route.call_count == 2
+
+
+class _Down:
+    name = "valhalla"
+    truck_aware = True
+
+    def __init__(self, status: int | None) -> None:
+        self.status = status
+
+    async def routes(
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
+    ) -> list[RouteCandidate]:
+        raise UpstreamError("valhalla", "down", self.status)
+
+
+class _Backup(_Down):
+    name = "tomtom"
+
+    async def routes(
+        self, waypoints: Sequence[LatLon], depart_at: datetime, truck: Truck, alternatives: int
+    ) -> list[RouteCandidate]:
+        return []
+
+
+async def test_our_router_falls_back_to_tomtom_when_it_is_down_but_not_on_a_bad_request() -> None:
+    from providers.routing import WithFallback
+
+    args = ([LatLon(35, -100), LatLon(36, -100)], DEPART, Truck(0), 0)
+    assert await WithFallback(_Down(503), _Backup(None)).routes(*args) == []
+    assert await WithFallback(_Down(None), _Backup(None)).routes(*args) == []
+    with pytest.raises(UpstreamError):
+        await WithFallback(_Down(400), _Backup(None)).routes(*args)
