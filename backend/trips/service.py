@@ -85,10 +85,10 @@ def _stop_places(line: Polyline) -> list[OnRoute]:
 
 
 def _weigh_stations(line: Polyline) -> list[OnRoute]:
-    """One per mile: a station is often mapped once per direction of travel."""
+    """A station is often mapped once per direction of travel, a mile or two apart: keep one."""
     out: list[OnRoute] = []
     for w in osm_places.along(line, "weigh", WEIGH_MAX_OFF_MI):
-        if not out or w.mile - out[-1].mile > 1.0:
+        if not out or w.mile - out[-1].mile > 2.5:
             out.append(w)
     return out
 
