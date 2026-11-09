@@ -52,14 +52,14 @@ async def places(request: HttpRequest, query: Query[PlacesQuery]) -> list[s.Plac
     return [s.PlaceSuggestion(label=p.label, lat=p.lat, lon=p.lon) for p in found]
 
 
-@api.get("/alerts")
+@api.get("/alerts", response=s.AlertAreasOut)
 async def alerts(request: HttpRequest, response: HttpResponse) -> dict[str, Any]:
     """Every active NWS warning, advisory and watch in the US, as GeoJSON for the map."""
     response["Cache-Control"] = "public, max-age=60"
     return await nws.cached_areas() or {"type": "FeatureCollection", "updated": None, "features": []}
 
 
-@api.get("/pois")
+@api.get("/pois", response=s.PoisOut)
 async def pois(request: HttpRequest, response: HttpResponse) -> dict[str, list[tuple[float, float, str]]]:
     """Truck stops, rest areas and weigh stations across the US (OpenStreetMap), for the map's layers."""
     response["Cache-Control"] = "public, max-age=86400"

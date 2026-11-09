@@ -101,9 +101,10 @@ def plan_stops(total_drive_s: float, rules: HosRules = DEFAULT_HOS, places: Floa
     break_after, brk, reset = rules.break_after_drive_h * HOUR, rules.break_min * 60, rules.reset_off_h * HOUR
 
     stops: list[Stop] = []
-    driven = since_break = shift_drive = shift_elapsed = 0.0
+    driven = shift_drive = shift_elapsed = 0.0
     while True:
-        room = min(break_after - since_break, max_drive - shift_drive, window - shift_elapsed)
+        # Every stop restarts the 8-hour break clock, so the next limit is at most 8 h of driving away.
+        room = min(break_after, max_drive - shift_drive, window - shift_elapsed)
         if total_drive_s - driven <= room + _EPS:
             return stops
         # Decided at the limit, before the stop moves earlier to a place.
@@ -114,10 +115,9 @@ def plan_stops(total_drive_s: float, rules: HosRules = DEFAULT_HOS, places: Floa
         driven += room
         if shift_spent:
             stops.append(Stop(driven, reset, StopKind.REST, place))
-            since_break = shift_drive = shift_elapsed = 0.0
+            shift_drive = shift_elapsed = 0.0
         else:
             stops.append(Stop(driven, brk, StopKind.BREAK, place))
-            since_break = 0.0
             shift_drive += room
             shift_elapsed += room + brk
 

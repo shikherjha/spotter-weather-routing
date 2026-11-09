@@ -10,6 +10,8 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY . .
 
 ENV PATH="/app/.venv/bin:$PATH"
+# Where the worker keeps the forecast copy and zone outlines: mount a volume here.
+ENV DATA_DIR=/data
 EXPOSE 8000
 # One async API process is plenty (requests wait on I/O, not CPU), plus the data worker.
 CMD ["./start.sh"]

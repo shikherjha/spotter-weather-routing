@@ -6,10 +6,12 @@
     `.idx` listing where every field starts. About 750 MB per run instead of ~25 GB.
   * Each field is sampled at the centre of every H3 res-6 cell (~3 km across, close to NBM's
     2.5 km grid) and stored as one float16 array (cells, fields, hours) for a memory map.
-  * NBM is hourly for 48 h, then wind every 3 h and snow as 6 h totals. Everything is put
-    on one hourly axis: wind is interpolated, totals are spread evenly over their window.
+  * NBM is hourly for 48 h; after that wind comes every 3 h, precipitation as 1 h totals every
+    3rd hour plus 6 h totals, and snow as 6 h totals. Everything is put on one hourly axis: wind
+    is interpolated, and each total is shared over the hours its shorter totals don't cover.
   * NBM's precipitation includes snow (as water). Rain is what's left after taking out the
-    snow's water at 10:1; where a snow total is missing, temperature decides rain or snow.
+    snow's water at 10:1; a 6 h snow total follows the hourly precipitation inside its window.
+    Where there is no snow total, temperature decides rain or snow.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 
 import eccodes
@@ -43,7 +46,9 @@ BUCKET = "https://noaa-nbm-grib2-pds.s3.amazonaws.com"
 RES = 6
 HORIZON_H = 168
 ROWS = ("wind", "gust", "dir", "rain", "snow")
-MIN_HOURS = 168  # a run counts as complete once it reaches this far
+MIN_HOURS = 168  # a run counts as complete once it reaches this far...
+MAX_GAP_H = 3  # ...with no gaps longer than NBM's 3-hourly steps...
+HOURLY_UNTIL_H = 36  # ...and every hour up to here (all NBM runs are hourly this far)
 SNOW_TO_WATER = 0.1  # 10 in of snow is about 1 in of water
 FREEZING_C = 0.5
 CONCURRENCY = 24
@@ -174,14 +179,21 @@ async def _forecast_hours(day: str, hour: str) -> list[int]:
         token = m[1]
 
 
+def is_complete(hours: list[int]) -> bool:
+    """Every hour to HOURLY_UNTIL_H, then no gap longer than NBM's 3-hourly steps, out to MIN_HOURS."""
+    if not hours or hours[-1] < MIN_HOURS or set(range(1, HOURLY_UNTIL_H + 1)) - set(hours):
+        return False
+    return all(b - a <= MAX_GAP_H for a, b in pairwise(hours))
+
+
 async def latest_run(now: datetime | None = None) -> tuple[datetime, list[int]] | None:
-    """The newest run that reaches MIN_HOURS ahead, with the forecast hours it has."""
+    """The newest complete run, with the forecast hours it has."""
     now = now or datetime.now(UTC)
     for day_offset in (0, 1):
         day = datetime.fromtimestamp(now.timestamp() - day_offset * 86400, UTC).strftime("%Y%m%d")
         for hour in reversed(await _list_runs(day)):
             hours = await _forecast_hours(day, hour)
-            if hours and hours[-1] >= MIN_HOURS:
+            if is_complete(hours):
                 return datetime.strptime(day + hour, "%Y%m%d%H").replace(tzinfo=UTC), hours
     return None
 
@@ -200,7 +212,7 @@ def _instant(series: dict[int, np.ndarray], n: int, hours: np.ndarray, nearest: 
     hi = np.clip(np.searchsorted(known, hours), 1, len(known) - 1) if len(known) > 1 else np.zeros_like(hours)
     lo = np.maximum(hi - 1, 0)
     span = np.maximum(known[hi] - known[lo], 1)
-    frac = np.clip((hours - known[lo]) / span, 0, 1)
+    frac = np.clip((hours - known[lo]) / span, 0, 1).astype(np.float32)  # keeps the result float32
     ok = (hours >= known[0]) & (hours <= known[-1])
     if nearest:
         vals = np.where(frac < 0.5, stack[:, lo], stack[:, hi])
@@ -211,17 +223,45 @@ def _instant(series: dict[int, np.ndarray], n: int, hours: np.ndarray, nearest: 
 
 
 def _totals(windows: list[tuple[int, int, np.ndarray]], n: int, hours: np.ndarray) -> np.ndarray:
-    """(n, H) hourly amounts from (window end, window length, total); shortest windows win."""
+    """(n, H) hourly amounts from (window end, window length, total).
+
+    Shortest windows go first. A longer window shares only what its already-filled hours don't
+    account for over the rest, so a 6 h total and the 1 h totals inside it add up to the 6 h total.
+    """
     out = np.full((n, len(hours)), np.nan, dtype=np.float32)
     filled = np.zeros(len(hours), dtype=bool)
     col = {int(h): k for k, h in enumerate(hours)}
     for end, length, total in sorted(windows, key=lambda w: (w[1], w[0])):
-        span = [col[h] for h in range(end - length + 1, end + 1) if h in col and not filled[col[h]]]
-        if not span:
+        cols = [col[h] for h in range(end - length + 1, end + 1) if h in col]
+        free = [c for c in cols if not filled[c]]
+        if not free:
             continue
-        out[:, span] = (total / length)[:, None]
-        filled[span] = True
+        known = [c for c in cols if filled[c]]
+        rest = total - np.nansum(out[:, known], axis=1) if known else total
+        out[:, free] = (np.maximum(rest, 0.0) / len(free))[:, None]
+        filled[free] = True
     return out
+
+
+def _snow_follows_precip(
+    snow: np.ndarray, windows: list[tuple[int, int, np.ndarray]], precip: np.ndarray, hours: np.ndarray
+) -> None:
+    """Inside each multi-hour snow total, put the snow where the precipitation is (in place)."""
+    col = {int(h): k for k, h in enumerate(hours)}
+    for end, length, total in windows:
+        if length == 1:
+            continue
+        cols = [col[h] for h in range(end - length + 1, end + 1) if h in col]
+        if not cols:
+            continue
+        window_precip = np.nansum(precip[:, cols], axis=1)
+        share = np.divide(
+            precip[:, cols],
+            window_precip[:, None],
+            out=np.full((len(total), len(cols)), 1 / len(cols), dtype=np.float32),
+            where=window_precip[:, None] > 0,
+        )
+        snow[:, cols] = np.where(np.isnan(snow[:, cols]), np.nan, total[:, None] * M_TO_IN * share)
 
 
 async def _download(msg: Message, gate: asyncio.Semaphore) -> bytes:
@@ -233,16 +273,21 @@ async def _download(msg: Message, gate: asyncio.Semaphore) -> bytes:
     return resp.content
 
 
+def unscan_alternate_rows(values: np.ndarray, nx: int, ny: int) -> np.ndarray:
+    """GRIB "alternative row scanning": every other row runs east to west. Flip those (in place)."""
+    rows = values.reshape(ny, nx)
+    rows[1::2] = rows[1::2, ::-1].copy()
+    return values
+
+
 def _decode(raw: bytes) -> tuple[int, np.ndarray]:
     """Values in plain row order: west to east, rows south to north."""
     handle = eccodes.codes_new_from_message(raw)
     values = np.asarray(eccodes.codes_get_values(handle), dtype=np.float32)
     missing = float(eccodes.codes_get(handle, "missingValue"))
     values[values == missing] = np.nan
-    if eccodes.codes_get(handle, "alternativeRowScanning") == 1:  # NBM stores every other row east to west
-        nx, ny = int(eccodes.codes_get(handle, "Nx")), int(eccodes.codes_get(handle, "Ny"))
-        rows = values.reshape(ny, nx)
-        rows[1::2] = rows[1::2, ::-1].copy()
+    if eccodes.codes_get(handle, "alternativeRowScanning") == 1:  # how NBM stores its grid
+        unscan_alternate_rows(values, int(eccodes.codes_get(handle, "Nx")), int(eccodes.codes_get(handle, "Ny")))
     return handle, values
 
 
@@ -269,9 +314,13 @@ async def sync(root: Path, area: BaseGeometry) -> Path | None:
         url = _file_url(run, fh)
         async with gate:
             resp = await fetch(PROVIDER, "GET", url + ".idx")
-        return parse_idx(resp.text, url) if resp.is_success else []
+        if not resp.is_success:  # a missing hour would be interpolated over silently: try again next time
+            raise UpstreamError(PROVIDER, f"no index for {run_id} f{fh:03d}", resp.status_code)
+        return parse_idx(resp.text, url)
 
-    messages = [m for part in await asyncio.gather(*(idx(fh) for fh in wanted)) for m in part]
+    async with asyncio.TaskGroup() as tg:
+        parts = [tg.create_task(idx(fh)) for fh in wanted]
+    messages = [m for part in parts for m in part.result()]
     if not messages:
         log.warning("NBM %s lists no fields we use", run_id)
         return None
@@ -297,16 +346,17 @@ async def sync(root: Path, area: BaseGeometry) -> Path | None:
 
     first, *rest = messages
     await take(first)  # builds the grid map once before the rest run in parallel
-    await asyncio.gather(*(take(m) for m in rest))
+    async with asyncio.TaskGroup() as tg:  # one failed download cancels the others
+        for m in rest:
+            tg.create_task(take(m))
     assert grid is not None
 
     hours = np.arange(1, HORIZON_H + 1)
     n = len(grid.cells)
-    data = await asyncio.to_thread(_assemble, inst, acc, n, hours)
     tmp = root / "runs" / f".{run_id}.tmp"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
-    np.save(tmp / "forecast.npy", data)
+    await asyncio.to_thread(_assemble, inst, acc, n, hours, tmp / "forecast.npy")
     np.save(tmp / "cells.npy", grid.cells)
     meta = {"run": int(run.timestamp()), "first": int(run.timestamp() + HOUR), "hours": len(hours), "rows": ROWS}
     (tmp / "meta.json").write_text(json.dumps(meta))
@@ -318,20 +368,29 @@ async def sync(root: Path, area: BaseGeometry) -> Path | None:
 
 
 def _assemble(
-    inst: dict[str, dict[int, np.ndarray]], acc: dict[str, list[tuple[int, int, np.ndarray]]], n: int, hours: np.ndarray
-) -> np.ndarray:
-    wind = _instant(inst["WIND"], n, hours) * MS_TO_MPH
-    gust = _instant(inst["GUST"], n, hours) * MS_TO_MPH
-    wdir = _instant(inst["WDIR"], n, hours, nearest=True)
-    temp_c = _instant(inst["TMP"], n, hours) - 273.15
-    precip = _totals(acc["APCP"], n, hours) * MM_TO_IN  # water, rain and snow together
-    snow = _totals(acc["ASNOW"], n, hours) * M_TO_IN
+    inst: dict[str, dict[int, np.ndarray]],
+    acc: dict[str, list[tuple[int, int, np.ndarray]]],
+    n: int,
+    hours: np.ndarray,
+    path: Path,
+) -> None:
+    """Write the (n, rows, hours) float16 array to `path`, one field at a time to keep memory down."""
+    out = np.lib.format.open_memmap(path, mode="w+", dtype=np.float16, shape=(n, len(ROWS), len(hours)))
+    out[:, ROWS.index("wind")] = _instant(inst["WIND"], n, hours) * MS_TO_MPH
+    out[:, ROWS.index("gust")] = _instant(inst["GUST"], n, hours) * MS_TO_MPH
+    out[:, ROWS.index("dir")] = _instant(inst["WDIR"], n, hours, nearest=True)
+    precip = _totals(acc["APCP"], n, hours) * np.float32(MM_TO_IN)  # water, rain and snow together
+    snow = _totals(acc["ASNOW"], n, hours) * np.float32(M_TO_IN)
+    _snow_follows_precip(snow, acc["ASNOW"], precip, hours)
+    cold = (_instant(inst["TMP"], n, hours) - np.float32(273.15)) <= FREEZING_C
     no_snow_total = np.isnan(snow) & ~np.isnan(precip)
-    cold = temp_c <= FREEZING_C
-    snow = np.where(no_snow_total, np.where(cold, precip / SNOW_TO_WATER, 0.0), snow)
-    rain = np.where(no_snow_total & cold, 0.0, np.maximum(precip - np.nan_to_num(snow) * SNOW_TO_WATER, 0.0))
-    rain = np.where(np.isnan(precip), np.nan, rain)
-    return np.stack([wind, gust, wdir, rain, snow], axis=1).astype(np.float16)  # (n, rows, hours)
+    snow = np.where(no_snow_total, np.where(cold, precip / np.float32(SNOW_TO_WATER), 0.0), snow)
+    rain = np.where(
+        no_snow_total & cold, 0.0, np.maximum(precip - np.nan_to_num(snow) * np.float32(SNOW_TO_WATER), 0.0)
+    )
+    out[:, ROWS.index("rain")] = np.where(np.isnan(precip), np.nan, rain)
+    out[:, ROWS.index("snow")] = snow
+    out.flush()
 
 
 def _point_current(root: Path, run_id: str) -> None:

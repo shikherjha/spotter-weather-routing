@@ -222,11 +222,26 @@ class _Backup(_Down):
         return []
 
 
-async def test_our_router_falls_back_to_tomtom_when_it_is_down_but_not_on_a_bad_request() -> None:
+async def test_our_router_falls_back_to_tomtom_on_any_failure() -> None:
     from providers.routing import WithFallback
 
     args = ([LatLon(35, -100), LatLon(36, -100)], DEPART, Truck(0), 0)
-    assert await WithFallback(_Down(503), _Backup(None)).routes(*args) == []
-    assert await WithFallback(_Down(None), _Backup(None)).routes(*args) == []
+    for status in (None, 401, 404, 503):  # down, a wrong token, a wrong URL, overloaded
+        assert await WithFallback(_Down(status), _Backup(None)).routes(*args) == []
+
+
+@respx.mock
+async def test_valhalla_no_route_is_an_empty_answer_not_an_error() -> None:
+    from providers.routing.valhalla import ValhallaRouting
+
+    respx.post("http://valhalla.test/route").mock(
+        return_value=httpx.Response(400, json={"error_code": 442, "error": "No path could be found for input"})
+    )
+    out = await ValhallaRouting("http://valhalla.test").routes(
+        [LatLon(35, -100), LatLon(36, -100)], DEPART, Truck(0), 0
+    )
+    assert out == []
+
+    respx.post("http://valhalla.test/route").mock(return_value=httpx.Response(401, text="unauthorized"))
     with pytest.raises(UpstreamError):
-        await WithFallback(_Down(400), _Backup(None)).routes(*args)
+        await ValhallaRouting("http://valhalla.test").routes([LatLon(35, -100), LatLon(36, -100)], DEPART, Truck(0), 0)

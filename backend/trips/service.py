@@ -60,6 +60,7 @@ from trips.warnings import route_warnings, sample_indices, spread
 log = logging.getLogger(__name__)
 
 ROUTE_LABELS = "ABCDE"
+COVERAGE_STEP = 50  # every 50th route vertex is enough to tell whether the local forecast covers a trip
 SKIP_DEG = 0.002  # ~200 m: a skipped place matches the one the driver tapped
 COARSEST_SAMPLE_RES = 3  # corridor sampling gets coarser down to this before the trip is refused
 
@@ -76,7 +77,8 @@ async def _routes(origin: LatLon, dest: LatLon, depart: datetime, truck: Truck) 
     if (hit := await cache.aget(key)) is not None:
         return list(hit)
     routes = await distinct_routes(provider, origin, dest, depart, truck)
-    if routes:
+    # Routes a backup provider answered for aren't cached under the main one's name.
+    if routes and all(r.provider == provider.name for r in routes):
         await cache.aset(key, routes, timeout=ROUTE_CACHE_S)
     return routes
 
@@ -237,7 +239,8 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
     t_route = time.perf_counter()
 
     demo = DemoStormWeather() if req.weather == "demo_storm" else None
-    weather: WeatherProvider = demo or get_weather_provider()
+    along = [(float(lat), float(lon)) for c in cands for lat, lon in c.coords[::COVERAGE_STEP]]
+    weather: WeatherProvider = demo if demo else await asyncio.to_thread(get_weather_provider, along)
     prep = await asyncio.to_thread(_prepare, cands, depart_s, req, weather)
     # NWS zone and town lookups run while the forecast downloads.
     sampled = [sample_indices(len(ll), req.interval_mi) for ll in prep.checkpoint_latlon]
@@ -249,7 +252,7 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
 
         done = await asyncio.to_thread(_compute, req, prep, grid)
         routes = routes_out(done.evals, cands, done.ranking, depart_s, prep.stop_places, prep.weigh_stations)
-        _name_towns(routes)
+        await asyncio.to_thread(_name_towns, routes)  # the first call loads the zone outlines
         warnings, warnings_status = await _warnings(
             routes, lookup, sampled, demo_alerts(demo.anchor_s) if demo else None
         )

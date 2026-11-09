@@ -82,7 +82,9 @@ async def ensure(root: Path) -> None:
         resp = await fetch(PROVIDER, "GET", url, timeout=600)
         if not resp.is_success:
             raise UpstreamError(PROVIDER, f"HTTP {resp.status_code} for {kind} outlines", resp.status_code)
-        target.write_bytes(resp.content)
+        part = target.with_suffix(".part")  # a cut-off download never looks finished
+        part.write_bytes(resp.content)
+        part.replace(target)
         for old in root.glob(f"{kind}-*.zip"):
             if old != target:
                 old.unlink()
@@ -123,12 +125,15 @@ class ZoneIndex:
     def __init__(self, zones: list[Zone], shapes: list[BaseGeometry], conus: BaseGeometry) -> None:
         self._zones = zones
         self._tree = shapely.STRtree(shapes)
-        self._by_code = {z.ugc: g for z, g in zip(zones, shapes, strict=True)}
+        by_code: dict[str, list[BaseGeometry]] = {}
+        for z, g in zip(zones, shapes, strict=True):
+            by_code.setdefault(z.ugc, []).append(g)  # some counties come in several pieces
+        self._by_code = by_code
         self.conus = conus
 
     def outline(self, codes: Iterable[str]) -> BaseGeometry | None:
         """The area covered by these zone codes, or None if none are known."""
-        found = [self._by_code[c] for c in codes if c in self._by_code]
+        found = [g for c in codes for g in self._by_code.get(c, [])]
         return unary_union(found) if found else None
 
     def at(self, coords: Sequence[tuple[float, float]]) -> list[PointZones | None]:
@@ -155,17 +160,23 @@ def _county_label(c: Zone) -> str:
 
 
 _lock = threading.Lock()
-_index: dict[Path, ZoneIndex | None] = {}
+_index: dict[Path, tuple[float, ZoneIndex]] = {}
 
 
 def load(root: Path) -> ZoneIndex | None:
-    """The index built by `ensure`, loaded once per process; None if it hasn't been built."""
+    """The index built by `ensure`, reloaded when it's rebuilt; None if it hasn't been built."""
+    path = root / "index.pkl"
     with _lock:
-        if root not in _index or _index[root] is None:
+        try:
+            built = path.stat().st_mtime
+        except OSError:
+            return None
+        cached = _index.get(root)
+        if cached is None or cached[0] != built:
             try:
-                with (root / "index.pkl").open("rb") as f:
+                with path.open("rb") as f:
                     data = pickle.load(f)  # written by `_build`, never downloaded
-                _index[root] = ZoneIndex(data["zones"], data["shapes"], data["conus"])
-            except (OSError, pickle.UnpicklingError, KeyError):
-                _index[root] = None
-        return _index[root]
+            except (OSError, pickle.UnpicklingError, EOFError, KeyError):
+                return None
+            _index[root] = (built, ZoneIndex(data["zones"], data["shapes"], data["conus"]))
+        return _index[root][1]

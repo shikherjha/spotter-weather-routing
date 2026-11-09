@@ -75,7 +75,7 @@ async def _no_alerts(states: list[str]) -> list[Alert]:
 @pytest.fixture
 def fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "get_routing_provider", lambda: _ThreeRoutes())
-    monkeypatch.setattr(service, "get_weather_provider", lambda: _StormWeather())
+    monkeypatch.setattr(service, "get_weather_provider", lambda points=(): _StormWeather())
     monkeypatch.setattr(service.nws, "points", _fake_points)
     monkeypatch.setattr(trip_warnings, "active_alerts", _no_alerts)
 

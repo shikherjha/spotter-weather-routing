@@ -20,6 +20,10 @@ from providers.routing.base import LatLon, RouteCandidate, Truck, times_from_anc
 
 LB_TO_TONNE = 0.00045359237
 FT_TO_M = 0.3048
+# Valhalla's "there is no route" answers (no path, no road near a point, unconnected regions):
+# the request is fine, the truck just can't get there. Anything else is the server's problem.
+NO_ROUTE_CODES = frozenset({170, 171, 442, 443})
+TIMEOUT_S = 10.0  # our own server answers in about a second; past this, use the backup
 
 
 def decode_polyline6(encoded: str) -> np.ndarray:
@@ -74,8 +78,12 @@ class ValhallaRouting:
         }
         if alternatives and len(waypoints) == 2:
             body["alternates"] = alternatives
-        resp = await fetch(self.name, "POST", self._url, json=body, headers=self._headers)
+        resp = await fetch(
+            self.name, "POST", self._url, attempts=1, timeout=TIMEOUT_S, json=body, headers=self._headers
+        )
         if not resp.is_success:
+            if _error_code(resp) in NO_ROUTE_CODES:
+                return []
             raise UpstreamError(self.name, _error_text(resp), resp.status_code)
         data = json_or_error(self.name, resp)
         trips = [data["trip"]] + [a["trip"] for a in data.get("alternates", [])]
@@ -98,6 +106,14 @@ class ValhallaRouting:
         coords = np.concatenate(parts)
         anchor_idx = [min(i, len(coords) - 1) for i in anchor_idx]
         return RouteCandidate(coords, times_from_anchors(coords, anchor_idx, anchor_s), self.name, self.truck_aware)
+
+
+def _error_code(resp: httpx.Response) -> int | None:
+    try:
+        code = resp.json().get("error_code")
+    except (ValueError, AttributeError):
+        return None
+    return code if isinstance(code, int) else None
 
 
 def _error_text(resp: httpx.Response) -> str:

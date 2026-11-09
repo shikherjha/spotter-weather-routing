@@ -27,6 +27,11 @@ log = logging.getLogger("worker")
 ALERTS_EVERY_S = 60
 FORECAST_EVERY_S = 10 * 60
 ZONES_EVERY_S = 24 * 3600
+RETRY_S = 5 * 60  # after a failure, or while waiting on another job
+
+
+class NotReadyError(Exception):
+    """A job can't run yet because another hasn't finished (the forecast needs the zone outlines)."""
 
 
 async def _zones() -> None:
@@ -42,19 +47,24 @@ async def _forecast() -> None:
     root = get_env().data_dir
     index = zones.load(root / "zones")
     if index is None:
-        log.info("forecast sync waits for the zone outlines")
-        return
+        raise NotReadyError("the forecast sync waits for the zone outlines")
     await nbm.sync(root / "forecast", index.conus)
 
 
 async def _every(seconds: float, job: Callable[[], Awaitable[None]]) -> None:
+    """Run `job` every `seconds`; after a failure, try again in RETRY_S instead."""
     while True:
         started = time.monotonic()
+        wait = seconds
         try:
             await job()
+        except NotReadyError as e:
+            log.info("%s", e)
+            wait = RETRY_S
         except Exception:
             log.exception("%s failed", job.__name__.strip("_"))
-        await asyncio.sleep(max(seconds - (time.monotonic() - started), 1.0))
+            wait = RETRY_S
+        await asyncio.sleep(max(wait - (time.monotonic() - started), 1.0))
 
 
 async def _run(once: bool) -> None:
@@ -62,7 +72,6 @@ async def _run(once: bool) -> None:
         for job in (_zones, _alerts, _forecast):
             await job()
         return
-    await _zones()  # the forecast needs the US outline
     await asyncio.gather(
         _every(ZONES_EVERY_S, _zones),
         _every(ALERTS_EVERY_S, _alerts),

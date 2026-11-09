@@ -6,9 +6,11 @@ from pathlib import Path
 import h3
 import numpy as np
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from shapely.geometry import box
 
-from engine.eta import HOUR, StopKind, plan_stops
+from engine.eta import HOUR, HosRules, StopKind, plan_stops
 from providers.routing.valhalla import ValhallaRouting, decode_polyline6
 from providers.weather import local, nbm
 
@@ -40,15 +42,47 @@ def test_three_hourly_wind_is_interpolated_and_ends_at_the_last_hour() -> None:
     assert out[0, 2:6].tolist() == [3.0, 4.0, 5.0, 6.0]
 
 
-def test_totals_spread_over_their_window_and_hourly_ones_win() -> None:
+def test_a_longer_total_shares_only_what_its_hourly_totals_leave() -> None:
     hours = np.arange(1, 7)
-    six = (6, 6, np.array([6.0]))
-    one = (2, 1, np.array([5.0]))
-    out = nbm._totals([six, one], 1, hours)
-    assert out[0].tolist() == [1.0, 5.0, 1.0, 1.0, 1.0, 1.0]
+    six = (6, 6, np.array([6.0, 4.0]))
+    one = (2, 1, np.array([5.0, 5.0]))  # more than the 6 h total: nothing left, never negative
+    out = nbm._totals([six, one], 2, hours)
+    assert out[0].tolist() == pytest.approx([0.2, 5.0, 0.2, 0.2, 0.2, 0.2])
+    assert out[1].tolist() == [0.0, 5.0, 0.0, 0.0, 0.0, 0.0]
+    assert out[0].sum() == pytest.approx(6.0)
 
 
-def test_rain_is_precipitation_minus_the_snows_water() -> None:
+def test_a_six_hour_snow_total_falls_where_the_precipitation_does() -> None:
+    hours = np.arange(1, 7)
+    precip = np.array([[0.0, 0.0, 0.3, 0.1, 0.0, 0.0]], dtype=np.float32)
+    snow = np.full((1, 6), np.nan, dtype=np.float32)
+    snow[0, :] = 0.0
+    nbm._snow_follows_precip(snow, [(6, 6, np.array([0.1], dtype=np.float32))], precip, hours)
+    inches = 0.1 * nbm.M_TO_IN
+    assert snow[0].tolist() == pytest.approx([0, 0, inches * 0.75, inches * 0.25, 0, 0], rel=1e-5)
+
+
+def test_a_run_with_gaps_is_not_complete() -> None:
+    full = list(range(1, 49)) + list(range(51, 170, 3))
+    assert nbm.is_complete(full)
+    assert not nbm.is_complete([h for h in full if h != 30])  # a missing hour inside the hourly part
+    assert not nbm.is_complete([h for h in full if h not in (99, 102)])  # a 9 h hole later on
+    assert not nbm.is_complete(list(range(1, 100)))  # doesn't reach far enough
+
+
+def test_alternate_rows_are_flipped_back() -> None:
+    values = np.array([0, 1, 2, 5, 4, 3, 6, 7, 8], dtype=np.float32)  # row 1 stored east to west
+    assert nbm.unscan_alternate_rows(values, nx=3, ny=3).tolist() == [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+
+def test_fallback_weather_lines_up_on_the_local_hourly_axis() -> None:
+    src_times = np.array([0.0, 3600.0, 7200.0])
+    dst_times = np.array([3600.0, 7200.0, 10800.0])
+    out = local._align(src_times, np.array([[1.0, 2.0, 3.0]]), dst_times)
+    assert out[0, :2].tolist() == [2.0, 3.0] and np.isnan(out[0, 2])
+
+
+def test_rain_is_precipitation_minus_the_snows_water(tmp_path: Path) -> None:
     hours = np.arange(1, 2)
     inst = {
         "WIND": {1: np.array([1.0, 1.0, 1.0])},
@@ -59,7 +93,8 @@ def test_rain_is_precipitation_minus_the_snows_water() -> None:
     precip_mm = np.array([25.4, 25.4, 25.4])  # 1 in of water at each point
     snow_m = np.array([0.254, np.nan, np.nan])  # 10 in of snow at the first; no snow total elsewhere
     acc = {"APCP": [(1, 1, precip_mm)], "ASNOW": [(1, 1, snow_m)]}
-    data = nbm._assemble(inst, acc, 3, hours).astype(float)
+    nbm._assemble(inst, acc, 3, hours, tmp_path / "f.npy")
+    data = np.load(tmp_path / "f.npy").astype(float)
     rain, snow = data[:, 3, 0], data[:, 4, 0]
     assert rain == pytest.approx([0.0, 0.0, 1.0], abs=0.01)
     assert snow == pytest.approx([10.0, 10.0, 0.0], abs=0.05)
@@ -198,3 +233,52 @@ def test_a_skipped_place_is_never_planned_for(monkeypatch: pytest.MonkeyPatch) -
     line = Polyline.from_coords(np.array([[35.0, -100.0], [35.0, -102.0]]))
     assert [p.place.name for p in service._stop_places(line, [])] == ["A", "B"]
     assert [p.place.name for p in service._stop_places(line, [(35.0, -101.0)])] == ["A"]
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    total_h=st.floats(1, 60),
+    places_h=st.lists(st.floats(0.1, 60), max_size=40),
+    break_min=st.sampled_from([30.0, 150.0]),
+)
+def test_stops_at_places_never_break_the_hours_rules(total_h: float, places_h: list[float], break_min: float) -> None:
+    rules = HosRules(break_min=break_min)
+    places = np.array(sorted(places_h)) * HOUR
+    stops = plan_stops(total_h * HOUR, rules, places)
+    driven = shift_drive = shift_elapsed = 0.0
+    for s in stops:
+        leg = s.drive_s - driven
+        assert leg <= rules.break_after_drive_h * HOUR + 1e-6  # never more than 8 h without stopping
+        shift_drive += leg
+        shift_elapsed += leg
+        assert shift_drive <= rules.max_drive_h * HOUR + 1e-6
+        assert shift_elapsed <= rules.window_h * HOUR + 1e-6
+        if s.kind is StopKind.REST:
+            shift_drive = shift_elapsed = 0.0
+        else:
+            shift_elapsed += s.duration_s
+        driven = s.drive_s
+    last = total_h * HOUR - driven
+    assert last <= rules.break_after_drive_h * HOUR + 1e-6
+
+
+def test_the_clock_places_stops_at_the_given_miles() -> None:
+    from engine.eta import DriveProfile, TripClock
+
+    miles = np.linspace(0, 1200, 121)
+    profile = DriveProfile(miles, miles / 60.0 * HOUR)  # 60 mph
+    clock = TripClock.build(0.0, profile, places_mi=np.array([300.0, 470.0, 610.0]))
+    # A break at 470 (7.8 h in), the rest at 610 (the last place before the 11 h limit), then a break
+    # 8 h later with no place near it.
+    assert [round(m) for m in clock.stop_miles()] == [470, 610, 1090]
+
+
+def test_a_weigh_station_mapped_once_per_direction_counts_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.geometry import Polyline
+    from providers.osm_places import OnRoute, Place
+    from trips import service
+
+    found = [OnRoute(Place("weigh", "Weigh station", 35, -100, 0), m, 0.1) for m in (100.0, 101.1, 250.0)]
+    monkeypatch.setattr(service.osm_places, "along", lambda line, kind, off: found)
+    line = Polyline.from_coords(np.array([[35.0, -100.0], [35.0, -102.0]]))
+    assert [w.mile for w in service._weigh_stations(line)] == [100.0, 250.0]

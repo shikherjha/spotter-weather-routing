@@ -4,7 +4,7 @@ generate the OpenAPI schema, and (via codegen) the frontend's TypeScript types."
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -280,3 +280,19 @@ class PlaceSuggestion(BaseModel):
 
 class ErrorOut(BaseModel):
     detail: str
+
+
+class AlertAreasOut(BaseModel):
+    """Active NWS warnings, advisories and watches as GeoJSON features (event, kind, area, ends)."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    updated: int | None = Field(description="When the worker last refreshed the list; null if it hasn't yet")
+    features: list[dict[str, Any]]
+
+
+class PoisOut(BaseModel):
+    """Truck stops, rest areas and weigh stations from OpenStreetMap, each as [lat, lon, name]."""
+
+    truck_stop: list[tuple[float, float, str]]
+    rest_area: list[tuple[float, float, str]]
+    weigh: list[tuple[float, float, str]]

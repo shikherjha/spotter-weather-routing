@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -9,6 +10,8 @@ from providers.routing.tomtom import TomTomRouting
 from providers.routing.valhalla import ValhallaRouting
 
 __all__ = ["LatLon", "RouteCandidate", "RoutingProvider", "Truck", "get_routing_provider"]
+
+log = logging.getLogger(__name__)
 
 
 class WithFallback:
@@ -26,8 +29,9 @@ class WithFallback:
         try:
             return await self._primary.routes(waypoints, depart_at, truck, alternatives)
         except UpstreamError as e:
-            if e.status is not None and 400 <= e.status < 500:
-                raise  # the request itself is the problem (e.g. no truck route); TomTom would agree
+            # Down, slow, misconfigured (a wrong token or URL): the backup answers instead.
+            # Valhalla's own "no route" isn't an error; it comes back as an empty list.
+            log.warning("%s failed (%s); routing with %s", self._primary.name, e, self._backup.name)
             return await self._backup.routes(waypoints, depart_at, truck, alternatives)
 
 
