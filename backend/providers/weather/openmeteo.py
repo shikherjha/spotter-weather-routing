@@ -23,7 +23,6 @@ import httpx
 import numpy as np
 from django.core.cache import cache
 
-from config.env import get_env
 from engine.units import HOUR
 from engine.weather import WeatherGrid
 from providers.http import UpstreamError, fetch, json_or_error
@@ -78,6 +77,10 @@ def _parse_location(loc: dict[str, Any]) -> np.ndarray:
 
 class OpenMeteoWeather:
     name = "open-meteo"
+    # Every location counts against the free quota and goes in batches of CHUNK, so long trips
+    # get a coarser heatmap rather than more requests.
+    point_budget = 900
+    sample_res = 5
 
     def __init__(self, model: str, api_key: str | None = None) -> None:
         self.model = model
@@ -176,9 +179,3 @@ def _reason(resp: httpx.Response) -> str:
         return str(resp.json().get("reason", ""))
     except ValueError:
         return ""
-
-
-def get_weather_provider() -> OpenMeteoWeather:
-    env = get_env()
-    key = env.open_meteo_api_key.get_secret_value() if env.open_meteo_api_key else None
-    return OpenMeteoWeather(env.weather_model, key or None)

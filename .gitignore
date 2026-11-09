@@ -27,5 +27,8 @@ dist/
 .vscode/
 .claude/
 
+# Data the worker downloads (forecasts, zone outlines)
+var/
+
 # Brief (not ours to publish)
 reference/

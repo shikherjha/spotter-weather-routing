@@ -6,6 +6,9 @@ Two layers:
   2. FMCSA Hours-of-Service — mandatory breaks and 10-hour rests turn moving time
      into wall-clock time. On multi-day trips this shifts later checkpoints by 10+ h,
      which is the difference between sampling the storm and missing it.
+
+A truck can only stop where there's room for it, so when the route's truck stops and rest
+areas are known, each stop moves back to the last one before the legal limit.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ import numpy as np
 from engine.units import HOUR, FloatArray
 
 _EPS = 1e-6
+PLACE_LOOKBACK_S = 1.5 * HOUR  # how much earlier than the limit a driver will stop to find a place
+MIN_LEG_S = 0.25 * HOUR  # never stop again within this much driving of the last stop
 
 
 @dataclass(frozen=True)
@@ -74,13 +79,23 @@ class Stop:
     drive_s: float  # moving-time clock when the stop starts
     duration_s: float
     kind: StopKind
+    place: int | None = None  # index into the `places` the plan was given; None = at the limit
 
 
-def plan_stops(total_drive_s: float, rules: HosRules = DEFAULT_HOS) -> list[Stop]:
+def _place_before(places: FloatArray, limit_s: float, after_s: float) -> int | None:
+    """The last place at or before `limit_s`, if one is within PLACE_LOOKBACK_S of it."""
+    k = int(np.searchsorted(places, limit_s + _EPS, side="right")) - 1
+    if k >= 0 and places[k] >= max(limit_s - PLACE_LOOKBACK_S, after_s + MIN_LEG_S):
+        return k
+    return None
+
+
+def plan_stops(total_drive_s: float, rules: HosRules = DEFAULT_HOS, places: FloatArray | None = None) -> list[Stop]:
     """Greedy HOS schedule for a driver starting fresh (fully rested) at departure.
 
     Drives as long as allowed, then takes the shortest stop that unlocks more driving.
-    No stop is placed at the very end of the trip.
+    With `places` (sorted moving-time positions of truck stops and rest areas) a stop moves
+    back to the last place before the limit. No stop is placed at the very end of the trip.
     """
     max_drive, window = rules.max_drive_h * HOUR, rules.window_h * HOUR
     break_after, brk, reset = rules.break_after_drive_h * HOUR, rules.break_min * 60, rules.reset_off_h * HOUR
@@ -91,18 +106,20 @@ def plan_stops(total_drive_s: float, rules: HosRules = DEFAULT_HOS) -> list[Stop
         room = min(break_after - since_break, max_drive - shift_drive, window - shift_elapsed)
         if total_drive_s - driven <= room + _EPS:
             return stops
+        # Decided at the limit, before the stop moves earlier to a place.
+        shift_spent = shift_drive + room >= max_drive - _EPS or shift_elapsed + room + brk >= window - _EPS
+        place = _place_before(places, driven + room, driven) if places is not None and len(places) else None
+        if place is not None and places is not None:
+            room = float(places[place]) - driven
         driven += room
-        since_break += room
-        shift_drive += room
-        shift_elapsed += room
-        shift_spent = shift_drive >= max_drive - _EPS or shift_elapsed + brk >= window - _EPS
         if shift_spent:
-            stops.append(Stop(driven, reset, StopKind.REST))
+            stops.append(Stop(driven, reset, StopKind.REST, place))
             since_break = shift_drive = shift_elapsed = 0.0
         else:
-            stops.append(Stop(driven, brk, StopKind.BREAK))
+            stops.append(Stop(driven, brk, StopKind.BREAK, place))
             since_break = 0.0
-            shift_elapsed += brk
+            shift_drive += room
+            shift_elapsed += room + brk
 
 
 @dataclass(frozen=True)
@@ -114,8 +131,16 @@ class TripClock:
     stops: list[Stop] = field(default_factory=list)
 
     @classmethod
-    def build(cls, departure_s: float, profile: DriveProfile, hos: HosRules | None = DEFAULT_HOS) -> TripClock:
-        stops = plan_stops(profile.total_drive_s, hos) if hos else []
+    def build(
+        cls,
+        departure_s: float,
+        profile: DriveProfile,
+        hos: HosRules | None = DEFAULT_HOS,
+        places_mi: FloatArray | None = None,
+    ) -> TripClock:
+        """`places_mi`: sorted miles of truck stops and rest areas along the route, where stops go."""
+        places = None if places_mi is None else profile.drive_s_at(places_mi)
+        stops = plan_stops(profile.total_drive_s, hos, places) if hos else []
         return cls(departure_s, profile, stops)
 
     @property

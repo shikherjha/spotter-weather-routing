@@ -47,6 +47,8 @@ class _ThreeRoutes:
 
 class _StormWeather:
     model = "fake"
+    point_budget = 900
+    sample_res = 5
 
     async def grid(self, cells: Sequence[str]) -> WeatherGrid:
         import h3

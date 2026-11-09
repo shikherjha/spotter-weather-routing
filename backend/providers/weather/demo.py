@@ -49,6 +49,8 @@ def _window(t: np.ndarray, on: float, off: float, ramp_h: float = 3.0) -> np.nda
 
 class DemoStormWeather:
     model = "demo_storm"  # same string as the request's weather="demo_storm"
+    point_budget = 20_000  # computed, not fetched
+    sample_res = 6
 
     def __init__(self, now_s: float | None = None) -> None:
         now = time.time() if now_s is None else now_s

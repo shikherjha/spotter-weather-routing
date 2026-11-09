@@ -21,7 +21,7 @@ import numpy as np
 from django.core.cache import cache
 
 from engine.advisor import DepartureAdvice, sweep_departures
-from engine.corridor import SAMPLE_RES, Corridor, build_corridor
+from engine.corridor import Corridor, build_corridor
 from engine.eta import DEFAULT_HOS, DriveProfile, TripClock
 from engine.evaluate import RouteEvaluation, RoutePlan, evaluate
 from engine.geometry import Polyline
@@ -29,12 +29,13 @@ from engine.sampling import Checkpoints, place_checkpoints
 from engine.scoring import Ranking, rank
 from engine.units import HOUR
 from engine.weather import WeatherGrid
-from providers import nws
+from providers import nws, osm_places
 from providers.nws import Alert, PointInfo
+from providers.osm_places import OnRoute
 from providers.routing import LatLon, RouteCandidate, get_routing_provider
 from providers.routing.alternatives import distinct_routes
+from providers.weather import WeatherProvider, get_weather_provider
 from providers.weather.demo import DemoStormWeather, demo_alerts
-from providers.weather.openmeteo import get_weather_provider
 from trips import schemas as s
 from trips.limits import (
     ADVISOR_HOURS,
@@ -44,10 +45,11 @@ from trips.limits import (
     MAX_LEAD_DAYS,
     POINTS_WAIT_S,
     ROUTE_CACHE_S,
+    STOP_MAX_OFF_MI,
     TRIP_CACHE_S,
     TRUCK_MAX_MPH,
     WARNINGS_WAIT_S,
-    WEATHER_POINT_BUDGET,
+    WEIGH_MAX_OFF_MI,
 )
 from trips.serialize import departure_advice_out, heatmap_out, recommendation_out, routes_out
 from trips.timezones import tz_at
@@ -75,6 +77,21 @@ async def _routes(origin: LatLon, dest: LatLon, depart: datetime, load_lb: float
     return routes
 
 
+def _stop_places(line: Polyline) -> list[OnRoute]:
+    """Truck stops and rest areas by the route, where breaks and rests can be planned."""
+    found = osm_places.along(line, "truck_stop", STOP_MAX_OFF_MI) + osm_places.along(line, "rest_area", STOP_MAX_OFF_MI)
+    return sorted(found, key=lambda p: p.mile)
+
+
+def _weigh_stations(line: Polyline) -> list[OnRoute]:
+    """One per mile: a station is often mapped once per direction of travel."""
+    out: list[OnRoute] = []
+    for w in osm_places.along(line, "weigh", WEIGH_MAX_OFF_MI):
+        if not out or w.mile - out[-1].mile > 1.0:
+            out.append(w)
+    return out
+
+
 @dataclass
 class _Prepared:
     staged: list[tuple[Polyline, TripClock, Checkpoints]]
@@ -82,19 +99,25 @@ class _Prepared:
     checkpoint_cells: list[list[str]]
     checkpoint_latlon: list[list[tuple[float, float]]]
     weather_cells: list[str]
+    stop_places: list[list[OnRoute]]
+    weigh_stations: list[list[OnRoute]]
 
 
-def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest) -> _Prepared:
+def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest, weather: WeatherProvider) -> _Prepared:
     lines: list[Polyline] = []
     staged: list[tuple[Polyline, TripClock, Checkpoints]] = []
     cp_cells: list[list[str]] = []
     cp_latlon: list[list[tuple[float, float]]] = []
+    stop_places: list[list[OnRoute]] = []
     for c in cands:
         line = Polyline.from_coords(c.coords)
         profile = DriveProfile(line.cum_mi, c.cum_drive_s)
         if not c.truck_aware:
             profile = profile.capped(TRUCK_MAX_MPH)
-        clock = TripClock.build(depart_s, profile, hos=DEFAULT_HOS if req.hos else None)
+        places = _stop_places(line)
+        stop_places.append(places)
+        places_mi = np.array([p.mile for p in places])
+        clock = TripClock.build(depart_s, profile, hos=DEFAULT_HOS if req.hos else None, places_mi=places_mi)
         cps = place_checkpoints(line.length_mi, req.interval_mi)
         lats, lons = line.points_at(cps.miles)
         points = [(float(a), float(b)) for a, b in zip(lats, lons, strict=True)]
@@ -103,20 +126,22 @@ def _prepare(cands: list[RouteCandidate], depart_s: float, req: s.TripRequest) -
         lines.append(line)
         staged.append((line, clock, cps))
 
+    budget = weather.point_budget
     checkpoint_set = {c for cells in cp_cells for c in cells}
-    if len(checkpoint_set) > WEATHER_POINT_BUDGET:
+    if len(checkpoint_set) > budget:
         raise TripError("This trip is too long for checkpoints that close together. Try every 25 or 50 miles.")
     # Coarsen the corridor's weather sampling until the trip fits the budget; the heatmap's own
     # cells stay the same size (sampled values are interpolated onto them).
-    res = SAMPLE_RES
+    res = weather.sample_res
     corridor = build_corridor(lines, CORRIDOR_HALF_WIDTH_MI, sample_res=res)
-    while len(checkpoint_set) + len(corridor.sample_cells) > WEATHER_POINT_BUDGET and res > COARSEST_SAMPLE_RES:
+    while len(checkpoint_set) + len(corridor.sample_cells) > budget and res > COARSEST_SAMPLE_RES:
         res -= 1
         corridor = build_corridor(lines, CORRIDOR_HALF_WIDTH_MI, sample_res=res)
     weather_cells = sorted(checkpoint_set | set(corridor.sample_cells))
-    if len(weather_cells) > WEATHER_POINT_BUDGET:
+    if len(weather_cells) > budget:
         raise TripError("This trip is too long to check the weather along all three routes. Try a shorter trip.")
-    return _Prepared(staged, corridor, cp_cells, cp_latlon, weather_cells)
+    weigh = [_weigh_stations(line) for line in lines]
+    return _Prepared(staged, corridor, cp_cells, cp_latlon, weather_cells, stop_places, weigh)
 
 
 @dataclass
@@ -192,19 +217,19 @@ async def plan_trip(req: s.TripRequest) -> s.TripOut:
         raise TripError("No truck route found between these places.")
     t_route = time.perf_counter()
 
-    prep = await asyncio.to_thread(_prepare, cands, depart_s, req)
+    demo = DemoStormWeather() if req.weather == "demo_storm" else None
+    weather: WeatherProvider = demo or get_weather_provider()
+    prep = await asyncio.to_thread(_prepare, cands, depart_s, req, weather)
     # NWS zone and town lookups run while the forecast downloads.
     sampled = [sample_indices(len(ll), req.interval_mi) for ll in prep.checkpoint_latlon]
     coords = [ll[i] for ll, idx in zip(prep.checkpoint_latlon, sampled, strict=True) for i in idx]
     lookup = asyncio.create_task(nws.points(coords, POINTS_WAIT_S))
     try:
-        demo = DemoStormWeather() if req.weather == "demo_storm" else None
-        weather = demo or get_weather_provider()
         grid = await weather.grid(prep.weather_cells)
         t_wx = time.perf_counter()
 
         done = await asyncio.to_thread(_compute, req, prep, grid)
-        routes = routes_out(done.evals, cands, done.ranking, depart_s)
+        routes = routes_out(done.evals, cands, done.ranking, depart_s, prep.stop_places, prep.weigh_stations)
         warnings, warnings_status = await _warnings(
             routes, lookup, sampled, demo_alerts(demo.anchor_s) if demo else None
         )

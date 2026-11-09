@@ -16,6 +16,7 @@ from engine.rules import WindBasis, levels_array
 from engine.scoring import CRITERIA, Advice, Decision, Ranking
 from engine.units import HOUR, FloatArray
 from engine.weather import WeatherGrid
+from providers.osm_places import OnRoute
 from providers.routing import RouteCandidate
 from trips import schemas as s
 from trips.limits import HEATMAP_HOURS
@@ -54,13 +55,16 @@ def _display_path(line: Polyline) -> tuple[list[tuple[float, float]], list[float
     return path, path_mi
 
 
-def _stops(ev: RouteEvaluation) -> list[s.StopOut]:
+def _stops(ev: RouteEvaluation, places: list[OnRoute]) -> list[s.StopOut]:
     clock, line = ev.plan.clock, ev.plan.line
     miles = clock.stop_miles()
     lats, lons = line.points_at(miles)
     out = []
     for st, mi, lat, lon in zip(clock.stops, miles, lats, lons, strict=True):
         arrive = clock.departure_s + float(clock.elapsed_s_at_drive(np.array([st.drive_s]))[0])
+        at = places[st.place].place if st.place is not None else None
+        if at is not None:
+            lat, lon = at.lat, at.lon
         out.append(
             s.StopOut(
                 mile=round(float(mi), 2),
@@ -70,9 +74,28 @@ def _stops(ev: RouteEvaluation) -> list[s.StopOut]:
                 arrive=int(arrive),
                 depart=int(arrive + st.duration_s),
                 tz=tz_at(float(lat), float(lon)),
+                place=at.name if at else None,
+                place_kind=at.kind if at else None,  # type: ignore[arg-type]
             )
         )
     return out
+
+
+def _weigh(ev: RouteEvaluation, stations: list[OnRoute]) -> list[s.WeighStationOut]:
+    if not stations:
+        return []
+    etas = ev.plan.clock.eta_s(np.array([w.mile for w in stations]))
+    return [
+        s.WeighStationOut(
+            mile=round(w.mile, 1),
+            lat=w.place.lat,
+            lon=w.place.lon,
+            name=w.place.name,
+            eta=int(eta),
+            tz=tz_at(w.place.lat, w.place.lon),
+        )
+        for w, eta in zip(stations, etas, strict=True)
+    ]
 
 
 def _checkpoints(ev: RouteEvaluation) -> list[s.CheckpointOut]:
@@ -109,12 +132,17 @@ def _lost_on(d: Decision | None) -> s.DecisionOut | None:
 
 
 def routes_out(
-    evals: list[RouteEvaluation], cands: list[RouteCandidate], ranking: Ranking, depart_s: float
+    evals: list[RouteEvaluation],
+    cands: list[RouteCandidate],
+    ranking: Ranking,
+    depart_s: float,
+    stop_places: list[list[OnRoute]],
+    weigh_stations: list[list[OnRoute]],
 ) -> list[s.RouteOut]:
     position = {sc.route_id: i for i, sc in enumerate(ranking.order)}
     lost = {d.loser: d for d in ranking.decisions}
     out = []
-    for ev, cand in zip(evals, cands, strict=True):
+    for ev, cand, places, weigh in zip(evals, cands, stop_places, weigh_stations, strict=True):
         p, sc = ev.plan, ev.score
         path, path_mi = _display_path(p.line)
         out.append(
@@ -130,7 +158,8 @@ def routes_out(
                 arrival=int(depart_s + sc.duration_s),
                 path=path,
                 path_mi=path_mi,
-                stops=_stops(ev),
+                stops=_stops(ev, places),
+                weigh_stations=_weigh(ev, weigh),
                 checkpoints=_checkpoints(ev),
                 segments=_segments(ev),
                 score=s.ScoreOut(

@@ -30,6 +30,9 @@ class AppEnv(BaseSettings):
 
     http_timeout_s: float = Field(default=15.0, gt=0)
 
+    # Data the worker keeps on disk: the NBM forecast copy, NWS zone outlines, truck stops.
+    data_dir: Path = REPO_ROOT / "var"
+
     @property
     def allowed_hosts(self) -> list[str]:
         return [h.strip() for h in self.django_allowed_hosts.split(",") if h.strip()]

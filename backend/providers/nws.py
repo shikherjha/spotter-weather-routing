@@ -5,8 +5,10 @@ shape, so we don't intersect geometry: we ask /points which zones each sampled r
 in, then match alerts by code. Alerts that do carry a polygon (storm-based warnings) are also
 matched by shape, which is tighter than their county list.
 
-/points answers never change for a place, so they are cached for a month per ~1 km cell; the
-alert list is cached for a few minutes per set of states.
+When the worker keeps the zone outlines on disk (providers/zones.py), points are looked up
+locally instead of through /points, and it refreshes the nationwide alert list every minute, so
+a trip reads both without waiting on the network. Without the worker, /points answers are cached
+for a month per ~1 km cell and alerts for a few minutes per set of states.
 """
 
 from __future__ import annotations
@@ -25,7 +27,10 @@ from django.core.cache import cache
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
+from config.env import get_env
+from providers import zones as zone_index
 from providers.http import UpstreamError, fetch, json_or_error
+from providers.osm_places import nearest_towns
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +42,8 @@ POINT_TTL_S = 30 * 24 * 3600
 MISS = "miss"
 MISS_TTL_S = 10 * 60
 ALERTS_TTL_S = 5 * 60
+NATIONWIDE_KEY = "nws:alerts:all:v1"
+NATIONWIDE_TTL_S = 10 * 60  # the worker refreshes it every minute; stale after missing ten
 CONCURRENCY = 16
 
 
@@ -102,9 +109,12 @@ _background: set[asyncio.Task[PointInfo | None]] = set()
 async def points(coords: Sequence[tuple[float, float]], deadline_s: float) -> list[PointInfo | None]:
     """Zone codes and nearest place for each (lat, lon); None where NWS hasn't answered by the deadline.
 
-    Points in the same ~1 km cell share one lookup. Lookups still running at the deadline carry on in the
+    Uses the local zone outlines when the worker has built them. Otherwise points in the same ~1 km
+    cell share one /points lookup, and lookups still running at the deadline carry on in the
     background and fill the cache, so the next trip through the same area is instant.
     """
+    if (index := zone_index.load(get_env().data_dir / "zones")) is not None:
+        return await asyncio.to_thread(_local_points, index, coords)
     gate = asyncio.Semaphore(CONCURRENCY)
     cells = [h3.latlng_to_cell(lat, lon, POINT_RES) for lat, lon in coords]
     tasks: dict[str, asyncio.Task[PointInfo | None]] = {}
@@ -120,6 +130,12 @@ async def points(coords: Sequence[tuple[float, float]], deadline_s: float) -> li
         t.result() if t.done() and not t.cancelled() and t.exception() is None else None
         for t in (tasks[c] for c in cells)
     ]
+
+
+def _local_points(index: zone_index.ZoneIndex, coords: Sequence[tuple[float, float]]) -> list[PointInfo | None]:
+    found = index.at(coords)
+    towns = nearest_towns(coords, index)
+    return [PointInfo(z.zones, town or z.county, z.state) if z else None for z, town in zip(found, towns, strict=True)]
 
 
 def _ts(value: str | None) -> float | None:
@@ -151,15 +167,7 @@ def parse_alert(feature: dict[str, Any]) -> Alert | None:
     )
 
 
-async def active_alerts(states: Sequence[str]) -> list[Alert]:
-    """Active, actual alerts for these states (two-letter codes)."""
-    area = ",".join(sorted(set(states)))
-    if not area:
-        return []
-    key = f"nws:alerts:v1:{area}"
-    if (hit := await cache.aget(key)) is not None:
-        return list(hit)
-    data = await _get("/alerts/active", {"area": area, "status": "actual"})
+def _parse_all(data: dict[str, Any]) -> list[Alert]:
     alerts = []
     for feature in data.get("features", []):
         try:
@@ -167,5 +175,27 @@ async def active_alerts(states: Sequence[str]) -> list[Alert]:
                 alerts.append(alert)
         except (KeyError, TypeError, ValueError, shapely.errors.ShapelyError) as e:  # one malformed alert
             log.warning("skipping an NWS alert that didn't parse: %s", type(e).__name__)
+    return alerts
+
+
+async def refresh_nationwide() -> int:
+    """Fetch every active alert in the US into the cache (the worker calls this every minute)."""
+    alerts = _parse_all(await _get("/alerts/active", {"status": "actual"}))
+    await cache.aset(NATIONWIDE_KEY, alerts, timeout=NATIONWIDE_TTL_S)
+    return len(alerts)
+
+
+async def active_alerts(states: Sequence[str]) -> list[Alert]:
+    """Active, actual alerts for these states (two-letter codes)."""
+    wanted = set(states)
+    if not wanted:
+        return []
+    if (everywhere := await cache.aget(NATIONWIDE_KEY)) is not None:
+        return [a for a in everywhere if any(code[:2] in wanted for code in a.ugc)]
+    area = ",".join(sorted(wanted))
+    key = f"nws:alerts:v1:{area}"
+    if (hit := await cache.aget(key)) is not None:
+        return list(hit)
+    alerts = _parse_all(await _get("/alerts/active", {"area": area, "status": "actual"}))
     await cache.aset(key, alerts, timeout=ALERTS_TTL_S)
     return alerts

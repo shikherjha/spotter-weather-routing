@@ -7,9 +7,8 @@ CHECKPOINT_RES = 7  # H3 cell (~1.2 km) whose forecast a checkpoint uses; routes
 HEATMAP_HOURS = 49  # the slider's 0..48 h
 HEATMAP_ANCHOR_LEAD_H = 12  # leaving later than this from now: the slider starts at departure, not now
 ADVISOR_HOURS = range(0, 25)  # departures the advisor re-scores: now .. +24 h
-# Forecast locations per trip. Open-Meteo is fetched in batches of 500 and every location counts
-# against the free quota, so long trips get a coarser corridor rather than more requests.
-WEATHER_POINT_BUDGET = 900
+STOP_MAX_OFF_MI = 1.0  # truck stops and rest areas this close to the route can host a break
+WEIGH_MAX_OFF_MI = 0.3  # weigh stations sit beside the lanes
 ROUTE_CACHE_S = 30 * 60
 TRIP_CACHE_S = 24 * 3600
 POINTS_WAIT_S = 5.0  # NWS place/zone lookups, counted from when they start (alongside the forecast)
