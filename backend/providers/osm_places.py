@@ -23,6 +23,8 @@ from providers.zones import ZoneIndex
 DATA = Path(__file__).resolve().parents[1] / "data" / "osm_places.csv.gz"
 DEG_PER_MI = 1 / 69.0  # a degree of latitude; longitude degrees are shorter, so searches over-cover
 TOWN_MAX_MI = 25.0
+SEARCH_SIMPLIFY_DEG = 0.005  # ~500 m
+NEAREST_CHUNK = 64  # places compared against every route vertex at once
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,19 +97,25 @@ def along(line: Polyline, kind: str, max_off_mi: float) -> list[OnRoute]:
     if group is None:
         return []
     geom = LineString(np.column_stack([line.lons, line.lats]))
-    hits = group.tree.query(geom.buffer(max_off_mi * DEG_PER_MI * 1.5))
+    # Candidates near a simplified line (cheap to buffer); the exact distance is checked below.
+    search = geom.simplify(SEARCH_SIMPLIFY_DEG).buffer(max_off_mi * DEG_PER_MI * 1.5 + SEARCH_SIMPLIFY_DEG)
+    hits = group.tree.query(search)
     if not len(hits):
         return []
     places = [group.places[i] for i in hits.tolist()]
-    pts = shapely.points([p.lon for p in places], [p.lat for p in places])
-    along_deg = shapely.line_locate_point(geom, pts)
-    on_road = shapely.line_interpolate_point(geom, along_deg)
     lat = np.array([p.lat for p in places])
     lon = np.array([p.lon for p in places])
-    off = haversine_mi(lat, lon, shapely.get_y(on_road), shapely.get_x(on_road))
-    seg_deg = np.hypot(np.diff(line.lons), np.diff(line.lats))
-    cum_deg = np.concatenate(([0.0], np.cumsum(seg_deg)))
-    miles = np.interp(along_deg, cum_deg, line.cum_mi)
+    # Nearest route vertex on a local flat plane. Route vertices sit metres apart, so it stands in
+    # for the nearest point on the road, and its mile is the place's mile.
+    scale = np.cos(np.radians(lat.mean()))
+    nearest = np.empty(len(places), dtype=np.intp)
+    for start in range(0, len(places), NEAREST_CHUNK):
+        d2 = ((lon[start : start + NEAREST_CHUNK, None] - line.lons[None, :]) * scale) ** 2 + (
+            lat[start : start + NEAREST_CHUNK, None] - line.lats[None, :]
+        ) ** 2
+        nearest[start : start + NEAREST_CHUNK] = d2.argmin(axis=1)
+    off = haversine_mi(lat, lon, line.lats[nearest], line.lons[nearest])
+    miles = line.cum_mi[nearest]
     out = [OnRoute(p, float(m), float(o)) for p, m, o in zip(places, miles, off, strict=True) if o <= max_off_mi]
     return sorted(out, key=lambda r: r.mile)
 

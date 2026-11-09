@@ -2,8 +2,9 @@
 
 The copy (~380 MB) is read into memory once per forecast run, so a trip's cells (a few thousand
 with the heatmap) are rows of one in-memory array: a fraction of a second and no network. A
-memory map was tried first; on a network volume its scattered page reads took seconds per trip. It's used for trips it covers; the few
-cells just over a border come from Open-Meteo's GFS and are put on the same hourly axis.
+memory map was tried first; on a network volume its scattered page reads took seconds per trip.
+It's used for trips it covers; the few cells just over a border come from Open-Meteo's GFS and
+are put on the same hourly axis.
 """
 
 from __future__ import annotations

@@ -67,6 +67,9 @@ def build_corridor(
 
     cells = sorted(h3.h3shape_to_cells_experimental(h3.geo_to_h3shape(area_lonlat), RENDER_RES, contain="overlap"))
     centers = np.array([h3.cell_to_latlng(c) for c in cells])
+    if sample_res == RENDER_RES:  # weather read at the heatmap's own cells: nothing to spread
+        identity = np.arange(len(cells), dtype=np.intp)[:, None]
+        return Corridor(cells, centers, cells, centers, identity, np.ones((len(cells), 1)))
     sample_cells = sorted({h3.cell_to_parent(c, sample_res) for c in cells})
     sample_centers = np.array([h3.cell_to_latlng(c) for c in sample_cells])
     idx, weight = idw_weights(centers, sample_centers, k=min(k, len(sample_cells)), lat0=lat0)
