@@ -15,8 +15,8 @@ const TABS: [Exclude<Panel, null>, string][] = [
   ["timeline", "Timeline"],
 ];
 
-/** Everything about one route, behind a tap. On narrow screens it covers the page as a dialog. */
-export function Details({ trip, route, modal }: { trip: Trip; route: Route; modal: boolean }) {
+/** Everything about one route, behind a tap: a panel under the map, or the phone's sheet pulled up. */
+export function Details({ trip, route }: { trip: Trip; route: Route }) {
   const panel = useUi((s) => s.panel);
   const openPanel = useUi((s) => s.openPanel);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -26,8 +26,6 @@ export function Details({ trip, route, modal }: { trip: Trip; route: Route; moda
 
   return (
     <section
-      role={modal ? "dialog" : undefined}
-      aria-modal={modal || undefined}
       aria-labelledby="details-title"
       onKeyDown={(e) => e.key === "Escape" && openPanel(null)}
       className="flex h-full flex-col bg-surface lg:rounded-t-2xl lg:shadow-float"

@@ -37,7 +37,7 @@ export interface RouteHandlers {
 }
 
 /** Routes coloured by their own risk (picked route on top), checkpoints, weigh stations and the two ends. */
-export function routeLayers(trip: Trip, picked: Route, theme: Theme, on: RouteHandlers) {
+export function routeLayers(trip: Trip, picked: Route, theme: Theme, showWeigh: boolean, on: RouteHandlers) {
   const palette = RISK_RGB[theme];
   const ui = THEME_RGB[theme];
   const ordered = [...trip.routes.filter((r) => r.id !== picked.id), picked];
@@ -94,6 +94,7 @@ export function routeLayers(trip: Trip, picked: Route, theme: Theme, on: RouteHa
     new ScatterplotLayer<WeighStation>({
       id: "route-weigh",
       data: picked.weigh_stations,
+      visible: showWeigh,
       getPosition: (w) => [w.lon, w.lat],
       getRadius: 4,
       radiusUnits: "pixels",
@@ -178,8 +179,22 @@ export function placeLayers(pois: Pois | undefined, on: Record<Layer, boolean>, 
     pickable: true,
   };
   return [
-    new IconLayer<Poi>({ id: "rest-areas", data: pois?.rest_area ?? [], visible: on.restAreas, getIcon: icon(ui.halo, ui.ink), ...shared }),
-    new IconLayer<Poi>({ id: "truck-stops", data: pois?.truck_stop ?? [], visible: on.truckStops, getIcon: icon(ui.ink, ui.halo), ...shared }),
+    new IconLayer<Poi>({
+      id: "rest-areas",
+      data: pois?.rest_area ?? [],
+      visible: on.restAreas,
+      getIcon: icon(ui.halo, ui.ink),
+      updateTriggers: { getIcon: theme },
+      ...shared,
+    }),
+    new IconLayer<Poi>({
+      id: "truck-stops",
+      data: pois?.truck_stop ?? [],
+      visible: on.truckStops,
+      getIcon: icon(ui.ink, ui.halo),
+      updateTriggers: { getIcon: theme },
+      ...shared,
+    }),
     new ScatterplotLayer<Poi>({
       id: "weigh-stations",
       data: pois?.weigh ?? [],

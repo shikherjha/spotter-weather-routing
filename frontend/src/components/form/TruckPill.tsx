@@ -16,14 +16,12 @@ export function TruckPill({
   value,
   onChange,
   tinted = false,
-  startOpen = false,
 }: {
   value: TruckFields;
   onChange: (v: TruckFields) => void;
   tinted?: boolean;
-  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(startOpen);
+  const [open, setOpen] = useState(false);
   const id = useId();
   const load = parseLoad(value.load);
   const summary = truckSummary({ load_lb: Number.isFinite(load) ? load : 0, height_ft: value.heightFt, hazmat: value.hazmat });
@@ -33,7 +31,7 @@ export function TruckPill({
       <button
         type="button"
         aria-expanded={open}
-        aria-controls={id}
+        aria-controls={open ? id : undefined}
         onClick={() => setOpen(!open)}
         className="flex min-h-11 items-center gap-2.5 px-3 text-left"
       >

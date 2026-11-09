@@ -30,12 +30,14 @@ export function StopCard({
   onClose,
   onSkip,
   skipping,
+  error,
 }: {
   route: Route;
   stop: Stop;
   onClose: () => void;
   onSkip: (s: Stop) => void;
   skipping: boolean;
+  error: string | null;
 }) {
   const where = stopPlace(stop);
   const kind = stop.place_kind === "rest_area" ? "Rest area" : stop.place_kind === "truck_stop" ? "Truck stop" : "Roadside";
@@ -97,6 +99,11 @@ export function StopCard({
           Directions
         </a>
       </div>
+      {error && (
+        <p role="alert" className="m-0 text-[13px] text-severe">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

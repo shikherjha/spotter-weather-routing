@@ -56,14 +56,6 @@ export function PlayIcon({ playing }: { playing: boolean }) {
   );
 }
 
-export function CloudIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M4.5 12 A3 3 0 0 1 4.8 6 A4 4 0 0 1 12.5 7 A2.5 2.5 0 0 1 12 12 Z" />
-    </svg>
-  );
-}
-
 export function ThemeIcon({ dark }: { dark: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">

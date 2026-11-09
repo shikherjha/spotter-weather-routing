@@ -4,7 +4,7 @@ import { T0, checkpoint } from "../test/fixtures";
 import { parseLoad } from "./load";
 import { levelReason } from "./risk";
 import { duration, relativeToNow, sameDay, when } from "./time";
-import { pillLabel, stopLabel } from "./stops";
+import { pillLabel, stopLabel, weighLabel } from "./stops";
 import { truckNote } from "./truck";
 
 describe("time", () => {
@@ -65,5 +65,14 @@ describe("stop labels", () => {
     expect(stopLabel({ ...stop, kind: "rest", place: null, place_kind: null, town: "Raton, NM" })).toBe("10-h rest near Raton, NM");
     expect(stopLabel({ ...stop, kind: "rest", place: null, place_kind: null, town: null })).toBe("10-h rest");
     expect(pillLabel({ ...stop, kind: "rest", place: "TA", place_kind: "truck_stop", town: "Pueblo, CO" })).toBe("TA, Pueblo");
+  });
+});
+
+describe("weigh station labels", () => {
+  const w = { mile: 0, lat: 0, lon: 0, eta: 0, tz: "UTC" };
+  it("prefers a station's own name and adds the town", () => {
+    expect(weighLabel({ ...w, name: "Weigh station", town: "Trinidad, CO" })).toBe("Weigh station near Trinidad, CO");
+    expect(weighLabel({ ...w, name: "Raton Port of Entry", town: "Raton, NM" })).toBe("Raton Port of Entry, Raton, NM");
+    expect(weighLabel({ ...w, name: "Weigh station", town: null })).toBe("Weigh station");
   });
 });

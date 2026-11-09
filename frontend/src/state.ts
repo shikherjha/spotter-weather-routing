@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { Checkpoint, Stop } from "./api/types";
+import type { Checkpoint } from "./api/types";
 import type { Theme } from "./lib/risk";
 
 export type Panel = "stops" | "timeline" | null;
@@ -8,6 +8,12 @@ export type Panel = "stops" | "timeline" | null;
 /** Map layers a driver can switch on; the weather heatmap is `weatherOn`. */
 export type Layer = "warnings" | "truckStops" | "restAreas" | "weigh";
 const NO_LAYERS: Record<Layer, boolean> = { warnings: false, truckStops: false, restAreas: false, weigh: false };
+
+/** A break or rest, by its route and mile (trip objects are replaced when a trip is re-planned). */
+export interface StopRef {
+  routeId: string;
+  mile: number;
+}
 
 export interface Focus {
   routeId: string;
@@ -24,7 +30,7 @@ interface UiState {
   panel: Panel;
   focus: Focus | null;
   /** The break or rest whose card is open. */
-  stop: Stop | null;
+  stop: StopRef | null;
   layers: Record<Layer, boolean>;
   theme: Theme;
 
@@ -34,7 +40,7 @@ interface UiState {
   select: (routeId: string) => void;
   openPanel: (p: Panel) => void;
   setFocus: (f: Focus | null) => void;
-  openStop: (s: Stop | null) => void;
+  openStop: (s: StopRef | null) => void;
   toggleLayer: (l: Layer) => void;
   toggleTheme: () => void;
   resetView: () => void;
@@ -51,7 +57,7 @@ export const useUi = create<UiState>((set) => ({
   panel: null,
   focus: null,
   stop: null,
-  // Home opens on today's warnings; a trip opens calm, on its answer.
+  // Opens on today's warnings; after that the layers are the driver's choice, kept across trips.
   layers: { ...NO_LAYERS, warnings: true },
   theme: initialTheme(),
 
@@ -59,7 +65,7 @@ export const useUi = create<UiState>((set) => ({
   setHour: (hour) => set({ hour, weatherOn: true }),
   setWeather: (weatherOn) => set((s) => ({ weatherOn, playing: weatherOn && s.playing })),
   setPlaying: (playing) => set((s) => ({ playing, weatherOn: playing || s.weatherOn })),
-  select: (selected) => set((s) => (s.selected === selected ? {} : { selected, focus: null })),
+  select: (selected) => set((s) => (s.selected === selected ? {} : { selected, focus: null, stop: null })),
   openPanel: (panel) => set({ panel, focus: null }),
   setFocus: (focus) => set({ focus, stop: null }),
   openStop: (stop) => set({ stop, focus: null }),
@@ -75,6 +81,5 @@ export const useUi = create<UiState>((set) => ({
       }
       return { theme };
     }),
-  resetView: () =>
-    set({ selected: null, hour: 0, weatherOn: false, playing: false, panel: null, focus: null, stop: null, layers: NO_LAYERS }),
+  resetView: () => set({ selected: null, hour: 0, weatherOn: false, playing: false, panel: null, focus: null, stop: null }),
 }));

@@ -27,7 +27,6 @@ const usView = () => (window.innerWidth < 640 ? { longitude: -97, latitude: 38, 
 const SHIELD_AT = 0.42; // fraction along each route: by then alternatives have usually split apart
 const MIN_VIEW_PX = 120; // padding never squeezes the visible map below this
 
-
 const TIP_STYLE = {
   background: "var(--surface)",
   color: "var(--ink)",
@@ -106,11 +105,13 @@ export function MapView({
   padding,
   onSkipStop,
   skipping = false,
+  skipError = null,
 }: {
   trip: Trip | null;
   padding: Padding;
   onSkipStop?: (s: Stop) => void;
   skipping?: boolean;
+  skipError?: string | null;
 }) {
   const mapRef = useRef<MapRef>(null);
   const framedTrip = useRef<string | null>(null);
@@ -126,7 +127,7 @@ export function MapView({
   const setHour = useUi((s) => s.setHour);
   const openPanel = useUi((s) => s.openPanel);
   const on = useUi((s) => s.layers);
-  const stop = useUi((s) => s.stop);
+  const stopRef = useUi((s) => s.stop);
   const openStop = useUi((s) => s.openStop);
 
   // Fetched the first time a layer needs them; the place list is static, the warnings refresh each minute.
@@ -135,6 +136,7 @@ export function MapView({
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: getAlerts, enabled: on.warnings, staleTime: 60_000, refetchInterval: 120_000 });
 
   const picked = trip ? routeById(trip, selected) : null;
+  const stop = stopRef && picked?.id === stopRef.routeId ? (picked.stops.find((s) => s.mile === stopRef.mile) ?? null) : null;
   const pins = useMemo(() => (trip ? troubleSpots(trip) : []), [trip]);
   const cellIndex = useMemo(() => (trip ? trip.heatmap.cells.map((_, i) => i) : []), [trip]);
 
@@ -157,7 +159,7 @@ export function MapView({
   const routeLayerList = useMemo(
     () =>
       trip && picked
-        ? routeLayers(trip, picked, theme, {
+        ? routeLayers(trip, picked, theme, on.weigh, {
             onSelect: select,
             onCheckpoint: (routeId, cp) => {
               select(routeId);
@@ -165,7 +167,7 @@ export function MapView({
             },
           })
         : [],
-    [trip, picked, theme, select, setFocus],
+    [trip, picked, theme, on.weigh, select, setFocus],
   );
 
   const backdrop = useMemo(
@@ -244,12 +246,19 @@ export function MapView({
       ))}
 
       {picked?.stops.map((s) => (
-        <Marker key={`stop-${s.mile}`} longitude={s.lon} latitude={s.lat} anchor="left" onClick={onMarker(() => openStop(s))}>
+        <Marker
+          key={`stop-${s.mile}`}
+          longitude={s.lon}
+          latitude={s.lat}
+          anchor="left"
+          onClick={onMarker(() => openStop({ routeId: picked.id, mile: s.mile }))}
+        >
           <button
             type="button"
             aria-expanded={stop === s}
             aria-label={`${pillChip(s)} stop: ${pillLabel(s)}`}
-            className={`num -ml-1.5 flex h-7 items-center gap-1.5 rounded-full border-2 border-surface bg-ink pr-2.5 pl-1 text-xs font-bold whitespace-nowrap text-surface shadow-float ${stop === s ? "ring-3 ring-accent" : ""}`}
+            // The pill is drawn small to keep the map calm; the touch area around it is 44 px tall.
+            className={`num relative -ml-1.5 flex h-7 items-center gap-1.5 rounded-full border-2 border-surface bg-ink pr-2.5 pl-1 text-xs font-bold whitespace-nowrap text-surface shadow-float before:absolute before:-inset-y-2 before:inset-x-0 ${stop === s ? "ring-3 ring-accent" : ""}`}
           >
             <span className="rounded-full bg-surface px-1.5 leading-[18px] text-ink">{pillChip(s)}</span>
             <span className="max-w-48 truncate">{pillLabel(s)}</span>
@@ -259,7 +268,14 @@ export function MapView({
 
       {stop && picked && (
         <Popup longitude={stop.lon} latitude={stop.lat} offset={16} closeButton={false} closeOnClick={false} onClose={() => openStop(null)} maxWidth="330px">
-          <StopCard route={picked} stop={stop} onClose={() => openStop(null)} onSkip={(s) => onSkipStop?.(s)} skipping={skipping} />
+          <StopCard
+            route={picked}
+            stop={stop}
+            onClose={() => openStop(null)}
+            onSkip={(s) => onSkipStop?.(s)}
+            skipping={skipping}
+            error={skipError}
+          />
         </Popup>
       )}
 

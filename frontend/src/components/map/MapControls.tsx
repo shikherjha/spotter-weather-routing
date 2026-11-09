@@ -32,7 +32,7 @@ export function LayerChips({ trip, className = "", style }: { trip: Trip | null;
             type="button"
             aria-pressed={on}
             onClick={() => (c.key === "weather" ? setWeather(!weatherOn) : toggleLayer(c.key))}
-            className={`flex h-9 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold whitespace-nowrap shadow-float lg:h-[38px] ${
+            className={`flex h-11 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm font-semibold whitespace-nowrap shadow-float lg:h-[38px] ${
               on ? "border-ink bg-ink text-surface" : "border-rule bg-surface text-ink"
             }`}
           >
@@ -60,12 +60,17 @@ export function ThemeButton({ className = "" }: { className?: string }) {
   );
 }
 
-/** What the small dots on a route mean; everything else is labelled on the map or its switch. */
+/** What the small dots along a route mean; everything else is labelled on the map or its switch. */
 export function MapKey() {
   return (
     <div className="num absolute right-6 bottom-9 z-10 text-xs text-ink-2">
       <span className="flex items-center gap-1.5 rounded bg-surface/85 px-1.5">
-        <span className="size-2 rounded-full border-2 border-ink-2 bg-surface" /> Weather checked at each dot
+        <svg width="22" height="8" viewBox="0 0 22 8" aria-hidden="true">
+          <path d="M1 4 H21" stroke="var(--accent)" strokeWidth="5" strokeLinecap="round" />
+          <circle cx="6" cy="4" r="1.6" fill="var(--surface)" />
+          <circle cx="16" cy="4" r="1.6" fill="var(--surface)" />
+        </svg>
+        Weather checked at each dot
       </span>
     </div>
   );

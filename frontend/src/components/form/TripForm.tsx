@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 
 import { parseTrip } from "../../api/client";
 import { DEMO_WEATHER, type Place, type TripRequest } from "../../api/types";
-import { demoRequest } from "../../lib/demo";
 import { MAX_LOAD_LB, parseLoad } from "../../lib/load";
 import { nextHourInput } from "../../lib/time";
 import { saveTruck, savedTruck } from "../../lib/truck";
@@ -10,6 +9,7 @@ import { fieldBg, fieldClass } from "./fields";
 import { PlaceInput } from "./PlaceInput";
 import { TruckPill, type TruckFields } from "./TruckPill";
 
+const samePlace = (a: Place | null, b: Place | null | undefined) => !!b && a?.lat === b.lat && a?.lon === b.lon;
 
 type FieldName = "origin" | "destination" | "departure" | "load" | "interval";
 
@@ -37,6 +37,7 @@ export function TripForm({
       hazmat: initial?.hazmat ?? saved.hazmat,
     };
   });
+  const [truckEdited, setTruckEdited] = useState(false);
   const [spacing, setSpacing] = useState<TripRequest["interval_mi"]>(initial?.interval_mi ?? 25);
   const [hos, setHos] = useState(initial?.hos ?? true);
   const [demo, setDemo] = useState(initial?.weather === DEMO_WEATHER);
@@ -101,7 +102,10 @@ export function TripForm({
     const loadLb = parseLoad(truck.load);
     if (!(loadLb > 0 && loadLb <= MAX_LOAD_LB)) return setProblem("Enter the load in pounds, between 1 and 120,000 (for example 42000 or 42k).");
     setProblem(null);
-    saveTruck({ load_lb: loadLb, height_ft: truck.heightFt, hazmat: truck.hazmat });
+    // Re-planning an old trip shouldn't overwrite the truck you saved; changing it here should.
+    if (truckEdited) saveTruck({ load_lb: loadLb, height_ft: truck.heightFt, hazmat: truck.hazmat });
+    // Skipped stops belong to these two places; a different trip starts with none.
+    const sameEnds = samePlace(origin, initial?.origin) && samePlace(destination, initial?.destination);
     onSubmit({
       origin,
       destination,
@@ -109,22 +113,11 @@ export function TripForm({
       load_lb: loadLb,
       height_ft: truck.heightFt,
       hazmat: truck.hazmat,
-      skip_places: initial?.skip_places,
+      skip_places: sameEnds ? initial?.skip_places : [],
       interval_mi: spacing,
       hos,
       weather: demo ? DEMO_WEATHER : "live",
     });
-  };
-
-  const tryDemo = () => {
-    const req = demoRequest({ height_ft: truck.heightFt, hazmat: truck.hazmat });
-    setOrigin(req.origin);
-    setDestination(req.destination);
-    setTruck((t) => ({ ...t, load: String(req.load_lb) }));
-    setDeparture(req.departure_local);
-    setDemo(true);
-    setProblem(null);
-    onSubmit(req);
   };
 
   const message = problem ?? error;
@@ -218,6 +211,7 @@ export function TripForm({
         value={truck}
         onChange={(t) => {
           setTruck(t);
+          setTruckEdited(true);
           touched("load");
         }}
         tinted={filled.has("load")}
@@ -265,9 +259,6 @@ export function TripForm({
       <button type="submit" disabled={busy} className="flex h-12 items-center justify-center gap-2.5 rounded-[10px] bg-accent text-base font-bold text-accent-ink disabled:opacity-80">
         {busy && <span aria-hidden="true" className="size-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" />}
         {busy ? "Checking the weather…" : "Find the safest route"}
-      </button>
-      <button type="button" onClick={tryDemo} disabled={busy} className="-mt-1 self-center text-sm font-semibold text-accent disabled:opacity-60">
-        Or try Dallas → Denver in a simulated storm
       </button>
     </form>
   );

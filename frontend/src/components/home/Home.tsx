@@ -4,19 +4,21 @@ import { useState } from "react";
 
 import { getAlerts } from "../../api/client";
 import type { Place } from "../../api/types";
-import { parseLoad } from "../../lib/load";
+import { MAX_LOAD_LB, parseLoad } from "../../lib/load";
 import { recentTrips, type RecentTrip } from "../../lib/recent";
 import { saveTruck, savedTruck } from "../../lib/truck";
 import { PlaceInput } from "../form/PlaceInput";
 import { TruckPill, type TruckFields } from "../form/TruckPill";
 import { ChevronIcon, ClockIcon } from "../icons";
 
-export function WhereTo({ onPick }: { onPick: (p: Place) => void }) {
-  return <PlaceInput label="Where to?" value={null} onChange={(p) => p && onPick(p)} placeholder="Where to?" search />;
+export function WhereTo({ onPick, autoFocus = false }: { onPick: (p: Place) => void; autoFocus?: boolean }) {
+  return (
+    <PlaceInput label="Where to?" value={null} onChange={(p) => p && onPick(p)} placeholder="Where to?" search autoFocus={autoFocus} />
+  );
 }
 
 /** The saved truck, edited in place; a valid change is remembered right away. */
-export function MyTruck() {
+export function TruckSetting() {
   const [fields, setFields] = useState<TruckFields>(() => {
     const t = savedTruck();
     return { load: String(t.load_lb), heightFt: t.height_ft, hazmat: t.hazmat };
@@ -27,7 +29,7 @@ export function MyTruck() {
       onChange={(f) => {
         setFields(f);
         const load = parseLoad(f.load);
-        if (load > 0) saveTruck({ load_lb: load, height_ft: f.heightFt, hazmat: f.hazmat });
+        if (load > 0 && load <= MAX_LOAD_LB) saveTruck({ load_lb: load, height_ft: f.heightFt, hazmat: f.hazmat });
       }}
     />
   );
@@ -57,16 +59,16 @@ export function RecentTrips({ onOpen }: { onOpen: (r: RecentTrip) => void }) {
   );
 }
 
-export function DemoLink({ onDemo }: { onDemo: () => void }) {
+export function DemoLink({ onDemo, busy }: { onDemo: () => void; busy: boolean }) {
   return (
-    <button type="button" onClick={onDemo} className="min-h-11 self-start text-left text-sm font-semibold text-accent">
+    <button type="button" onClick={onDemo} disabled={busy} className="min-h-11 self-start text-left text-sm font-semibold text-accent disabled:opacity-60">
       Or try Dallas → Denver in a simulated storm
     </button>
   );
 }
 
 /** "Live · 12 warnings and 42 advisories in the US right now". */
-export function LiveLine({ className = "" }: { className?: string }) {
+export function LiveLine() {
   const alerts = useQuery({ queryKey: ["alerts"], queryFn: getAlerts, staleTime: 60_000, refetchInterval: 120_000 });
   const features = alerts.data?.features;
   if (!features || alerts.data?.updated == null) return null;
@@ -74,7 +76,7 @@ export function LiveLine({ className = "" }: { className?: string }) {
   const advisories = features.length - warnings;
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   return (
-    <p className={`num m-0 flex items-center gap-2 text-[13px] text-ink-2 ${className}`}>
+    <p className="num m-0 flex items-center gap-2 text-[13px] text-ink-2">
       <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[var(--risk-0)]" />
       <span>
         <strong className="text-ink">Live</strong> · {count(warnings, "warning", "warnings")} and{" "}

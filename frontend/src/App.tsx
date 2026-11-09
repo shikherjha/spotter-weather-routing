@@ -2,12 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { getTrip, planTrip } from "./api/client";
-import { DEMO_WEATHER, type Stop, type Trip, type TripRequest } from "./api/types";
+import { DEMO_WEATHER, type Place, type Stop, type Trip, type TripRequest } from "./api/types";
 import { DemoNote, LeaveLater, RouteCards, RouteList, TripLine, Verdict, WarningLink } from "./components/AnswerCard";
 import { Brand, Mark } from "./components/Brand";
 import { Details } from "./components/details/Details";
 import { TripForm } from "./components/form/TripForm";
-import { DemoLink, LiveLine, MyTruck, RecentTrips, WhereTo } from "./components/home/Home";
+import { DemoLink, LiveLine, RecentTrips, TruckSetting, WhereTo } from "./components/home/Home";
 import { LayerChips, MapKey, ThemeButton } from "./components/map/MapControls";
 import { MapView, type Padding } from "./components/map/MapView";
 import { Planning } from "./components/Planning";
@@ -15,7 +15,7 @@ import { Sheet } from "./components/Sheet";
 import { TimeSlider } from "./components/TimeSlider";
 import { useNarrowScreen } from "./hooks/useNarrowScreen";
 import { demoRequest } from "./lib/demo";
-import { remember, type RecentTrip } from "./lib/recent";
+import { remember, replanRequest, type RecentTrip } from "./lib/recent";
 import { routeById } from "./lib/route";
 import { localInput } from "./lib/time";
 import { savedTruck } from "./lib/truck";
@@ -29,6 +29,9 @@ const SLIDER_LEFT = GAP + CARD_W + 36;
 const PANEL_H = 480;
 
 const tripFromUrl = () => new URLSearchParams(window.location.search).get("trip");
+
+/** What a plan request came from, so its progress and errors show in the right place. */
+type Action = "plan" | "later" | "skip";
 
 /** The request behind a trip, so it can be edited or re-planned (also when opened from a shared link). */
 const requestFrom = (t: Trip): TripRequest => ({
@@ -55,6 +58,9 @@ export default function App() {
   const [editing, setEditing] = useState(false);
   // A trip being set up from home (a picked destination) or a recent trip to plan again.
   const [draft, setDraft] = useState<Partial<TripRequest> | null>(null);
+  const [action, setAction] = useState<Action>("plan");
+  // Back from a trip, keyboard focus goes to the search box instead of falling to the page.
+  const [focusSearch, setFocusSearch] = useState(false);
 
   useEffect(() => {
     const onPop = () => {
@@ -91,10 +97,13 @@ export default function App() {
   const expired = tripQ.isError && !editing;
   const view: "home" | "form" | "trip" = trip ? "trip" : editing || draft || expired ? "form" : "home";
 
-  // Each trip starts on its recommended route, at the first forecast hour, with every layer off.
+  // A new trip starts on its recommended route at the first forecast hour. The same trip coming back
+  // (after Edit, then Cancel) keeps its view. Map layers are the driver's choice and always carry over.
   const shownTrip = trip?.id;
+  const lastShown = useRef<string | null>(null);
   useEffect(() => {
-    if (shownTrip) resetView();
+    if (shownTrip && shownTrip !== lastShown.current) resetView();
+    if (shownTrip) lastShown.current = shownTrip;
   }, [shownTrip, resetView]);
 
   // When the details panel closes, put focus back on the picked route rather than losing it to the page.
@@ -112,24 +121,35 @@ export default function App() {
     return { top: 90, bottom: 150, left: GAP + CARD_W + 56, right: 90 };
   }, [narrow, panel, trip]);
 
+  const run = (a: Action, request: TripRequest) => {
+    setAction(a);
+    plan.mutate(request);
+  };
   const goHome = () => {
     plan.reset();
-    window.history.pushState(null, "", window.location.pathname);
+    // A form opened from home has its own history entry; going back to home pops it.
+    if (window.location.search === "?plan") window.history.back();
+    else if (window.location.search) window.history.pushState(null, "", window.location.pathname);
     setTripId(null);
     setEditing(false);
     setDraft(null);
+    setFocusSearch(true);
+  };
+  const pickDestination = (destination: Place) => {
+    window.history.pushState(null, "", "?plan");
+    setDraft({ destination });
   };
   const openRecent = (r: RecentTrip) => {
-    // Saved trips last a day; if this one has gone, the form opens with it filled in.
-    setDraft(r.request);
+    // Saved trips last a day; if this one has gone, the form opens with it filled in, leaving on the next hour.
+    setDraft(replanRequest(r));
     window.history.pushState(null, "", `?trip=${r.id}`);
     setTripId(r.id);
   };
   const replan = (departure: number) => {
-    if (trip) plan.mutate({ ...requestFrom(trip), departure_local: localInput(departure, trip.origin_tz) });
+    if (trip) run("later", { ...requestFrom(trip), departure_local: localInput(departure, trip.origin_tz) });
   };
   const skipStop = (s: Stop) => {
-    if (trip) plan.mutate({ ...requestFrom(trip), skip_places: [...trip.skip_places, [s.lat, s.lon]] });
+    if (trip) run("skip", { ...requestFrom(trip), skip_places: [...trip.skip_places, [s.lat, s.lon]] });
   };
   const edit = () => {
     plan.reset();
@@ -140,26 +160,25 @@ export default function App() {
     if (editing) setEditing(false);
     else goHome();
   };
-  const demo = () => plan.mutate(demoRequest(savedTruck()));
+  const demo = () => run("plan", demoRequest(savedTruck()));
+  const pending = (a: Action) => plan.isPending && action === a;
+  const failed = (a: Action) => (action === a ? (plan.error?.message ?? null) : null);
 
   const route = trip ? routeById(trip, selected) : null;
   const form = (
     <TripForm
       key={tripId ?? "new"}
       initial={tripQ.data ? requestFrom(tripQ.data) : draft}
-      busy={plan.isPending}
-      error={plan.error?.message ?? (expired ? "That trip has expired. Check it and plan it again." : null)}
-      onSubmit={(r) => plan.mutate(r)}
+      busy={pending("plan")}
+      error={failed("plan") ?? (expired ? "That trip has expired. Check it and plan it again." : null)}
+      onSubmit={(r) => run("plan", r)}
       onCancel={cancelForm}
     />
   );
-  const home = (
-    <>
-      <WhereTo onPick={(p) => setDraft({ destination: p })} />
-      <MyTruck />
-      <RecentTrips onOpen={openRecent} />
-      <DemoLink onDemo={demo} />
-    </>
+  const homeError = view === "home" && failed("plan") && (
+    <p role="alert" className="m-0 rounded-lg bg-tint px-3 py-2 text-sm text-severe">
+      {failed("plan")}
+    </p>
   );
   const answer = trip && (
     <>
@@ -171,9 +190,9 @@ export default function App() {
     </>
   );
   const leaveLater = trip && (
-    <LeaveLater trip={trip} onReplan={replan} busy={plan.isPending} error={plan.error?.message ?? null} />
+    <LeaveLater trip={trip} onReplan={replan} busy={pending("later")} error={failed("later")} />
   );
-  const map = <MapView trip={trip} padding={padding} onSkipStop={skipStop} skipping={plan.isPending} />;
+  const map = <MapView trip={trip} padding={padding} onSkipStop={skipStop} skipping={pending("skip")} skipError={failed("skip")} />;
 
   if (narrow) {
     return (
@@ -188,7 +207,7 @@ export default function App() {
           ) : (
             <div className="flex items-center gap-2 rounded-[18px] bg-surface p-1.5 pl-3 shadow-float">
               <Mark size={22} />
-              <div className="min-w-0 flex-1">{view === "home" && !loading ? <WhereTo onPick={(p) => setDraft({ destination: p })} /> : <PhoneTitle />}</div>
+              <div className="min-w-0 flex-1">{view === "home" && !loading ? <WhereTo onPick={pickDestination} /> : <PhoneTitle />}</div>
               <ThemeButton className="border-0 shadow-none" />
             </div>
           )}
@@ -205,22 +224,24 @@ export default function App() {
         {!loading && view === "home" && (
           <Sheet label="Your trips">
             <div className="flex flex-col gap-3 px-4 pb-5">
+              <h1 className="sr-only">Corridor: plan a truck trip</h1>
               <LiveLine />
-              <MyTruck />
+              <TruckSetting />
               <RecentTrips onOpen={openRecent} />
-              <DemoLink onDemo={demo} />
+              {homeError}
+              <DemoLink onDemo={demo} busy={plan.isPending} />
             </div>
           </Sheet>
         )}
         {!loading && view === "form" && (
-          <Sheet label="Plan a trip" up onUp={(up) => !up && cancelForm()}>
+          <Sheet label="Plan a trip" up>
             <div className="px-4 pb-6">{form}</div>
           </Sheet>
         )}
         {trip && route && (
           <Sheet label="The answer" up={panel !== null} onUp={(up) => openPanel(up ? "stops" : null)}>
             {panel ? (
-              <Details trip={trip} route={route} modal={false} />
+              <Details trip={trip} route={route} />
             ) : (
               <div ref={routeList} className="flex flex-col gap-3.5 px-4 pb-5">
                 <DemoNote trip={trip} />
@@ -241,7 +262,7 @@ export default function App() {
   return (
     <div className="relative h-full overflow-hidden bg-map text-ink">
       <div className="absolute inset-0">{map}</div>
-      {!panel && <LayerChips trip={trip} className="absolute top-6 right-[88px] z-10 flex-wrap" style={{ left: chipsLeft }} />}
+      <LayerChips trip={trip} className="absolute top-6 right-[88px] z-10 flex-wrap" style={{ left: chipsLeft }} />
       <ThemeButton className="absolute top-6 right-6 z-10" />
 
       {!trip && (
@@ -249,10 +270,19 @@ export default function App() {
           className="absolute z-10 flex max-h-[calc(100%-48px)] flex-col gap-3.5 overflow-y-auto rounded-[14px] bg-surface p-[18px] shadow-float"
           style={{ top: GAP, left: GAP, width: FORM_W }}
         >
-          {loading ? <p className="m-0 text-sm text-ink-2">Loading your trip…</p> : view === "form" ? form : (
+          {loading ? (
+            <p className="m-0 text-sm text-ink-2">Loading your trip…</p>
+          ) : view === "form" ? (
+            form
+          ) : (
             <>
+              <h1 className="sr-only">Corridor: plan a truck trip</h1>
               <Brand />
-              {home}
+              <WhereTo onPick={pickDestination} autoFocus={focusSearch} />
+              <TruckSetting />
+              <RecentTrips onOpen={openRecent} />
+              {homeError}
+              <DemoLink onDemo={demo} busy={plan.isPending} />
             </>
           )}
         </aside>
@@ -262,7 +292,7 @@ export default function App() {
           <LiveLine />
         </div>
       )}
-      {plan.isPending && !trip && <Planning request={plan.variables} className="top-6 left-[calc(50%+200px)] w-[380px] -translate-x-1/2" />}
+      {plan.isPending && !trip && <Planning request={plan.variables} className="top-20 left-[calc(50%+200px)] w-[380px] -translate-x-1/2" />}
 
       {trip && !panel && (
         <>
@@ -291,7 +321,7 @@ export default function App() {
 
       {trip && panel && route && (
         <div className="absolute inset-x-0 bottom-0 z-20" style={{ height: PANEL_H }}>
-          <Details trip={trip} route={route} modal={false} />
+          <Details trip={trip} route={route} />
         </div>
       )}
     </div>

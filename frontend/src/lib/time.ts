@@ -96,8 +96,8 @@ export function localInput(epochS: number, tz: string): string {
 }
 
 /** The next whole hour, as a datetime-local value in `tz` (the browser's zone by default). */
-export function nextHourInput(tz = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
-  return localInput((Math.floor(Date.now() / 1000 / HOUR) + 1) * HOUR, tz);
+export function nextHourInput(tz = Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date = new Date()): string {
+  return localInput((Math.floor(now.getTime() / 1000 / HOUR) + 1) * HOUR, tz);
 }
 
 /** "Mountain time" */
