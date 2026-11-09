@@ -4,6 +4,7 @@ import { T0, checkpoint } from "../test/fixtures";
 import { parseLoad } from "./load";
 import { levelReason } from "./risk";
 import { duration, relativeToNow, sameDay, when } from "./time";
+import { truckNote } from "./truck";
 
 describe("time", () => {
   it("names the zone of the place, not the viewer, including daylight time", () => {
@@ -44,5 +45,13 @@ describe("level reasons", () => {
   it("explains a load-rule escalation in words", () => {
     expect(levelReason(checkpoint(0, 4, { drivers: ["wind"], load_escalated: true }))).toBe("Wind 45–54 mph, load over 30,000 lb");
     expect(levelReason(checkpoint(0, 3))).toBe("Snow 2–3 in/hr");
+  });
+});
+
+describe("truck note", () => {
+  it("says nothing for a standard truck and names what differs", () => {
+    expect(truckNote(13.5, false)).toBe("");
+    expect(truckNote(14, true)).toBe("14′ 0″ tall · Hazmat");
+    expect(truckNote(12.5, false)).toBe("12′ 6″ tall");
   });
 });

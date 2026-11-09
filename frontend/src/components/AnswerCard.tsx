@@ -4,11 +4,13 @@ import { DEMO_WEATHER, type Trip } from "../api/types";
 import { cityName, routeById } from "../lib/route";
 import { leaveLater, routeStatus, shortArea, verdict, warningsOn } from "../lib/summary";
 import { duration, longWhen } from "../lib/time";
+import { truckNote } from "../lib/truck";
 import { useUi } from "../state";
 import { AlertIcon, CheckIcon, ChevronIcon, WarnIcon } from "./icons";
 import { Shield } from "./ui";
 
 export function TripLine({ trip, onEdit }: { trip: Trip; onEdit: () => void }) {
+  const note = truckNote(trip.height_ft, trip.hazmat);
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="num flex min-w-0 flex-col gap-0.5">
@@ -17,6 +19,7 @@ export function TripLine({ trip, onEdit }: { trip: Trip; onEdit: () => void }) {
         </span>
         <span className="text-[13px] text-ink-2">
           {longWhen(trip.departure, trip.origin_tz)} · {trip.load_lb.toLocaleString("en-US")} lb
+          {note && ` · ${note}`}
         </span>
       </div>
       <button type="button" onClick={onEdit} className="h-9 shrink-0 rounded-lg border border-rule px-3 text-sm font-semibold max-lg:h-11">

@@ -4,11 +4,9 @@ import { parseTrip } from "../../api/client";
 import { DEMO_WEATHER, type Place, type TripRequest } from "../../api/types";
 import { MAX_LOAD_LB, parseLoad } from "../../lib/load";
 import { nextHourInput } from "../../lib/time";
+import { DEFAULT_HEIGHT_FT, HEIGHTS_FT, feetInches } from "../../lib/truck";
 import { fieldBg, fieldClass } from "./fields";
 import { PlaceInput } from "./PlaceInput";
-
-const HEIGHTS_FT = [12.5, 13, 13.5, 14, 14.5, 15];
-const feetInches = (ft: number) => `${Math.floor(ft)}′ ${Math.round((ft % 1) * 12)}″`;
 
 const DEMO: Pick<TripRequest, "origin" | "destination" | "load_lb"> = {
   origin: { label: "Dallas, Texas, United States", lat: 32.7767, lon: -96.797 },
@@ -36,7 +34,7 @@ export function TripForm({
   const [departure, setDeparture] = useState(initial?.departure_local ?? nextHourInput());
   const [load, setLoad] = useState(initial ? String(initial.load_lb) : "40000");
   const [spacing, setSpacing] = useState<TripRequest["interval_mi"]>(initial?.interval_mi ?? 25);
-  const [heightFt, setHeightFt] = useState(initial?.height_ft ?? 13.5);
+  const [heightFt, setHeightFt] = useState(initial?.height_ft ?? DEFAULT_HEIGHT_FT);
   const [hazmat, setHazmat] = useState(initial?.hazmat ?? false);
   const [hos, setHos] = useState(initial?.hos ?? true);
   const [demo, setDemo] = useState(initial?.weather === DEMO_WEATHER);
