@@ -77,7 +77,7 @@ More detail: [problem and decisions](docs/01-problem.md) · [research](docs/02-r
 
 ## Performance
 
-- New area, cold caches: about 2–3 s, most of it the three truck routes from Valhalla. Weather (~0.5 s), warnings and place names are local reads. Same trip again: about 0.5 s, from Redis.
+- Measured on the live app, end to end from a laptop: a new trip takes about 2 s (1.7–2.4 s), most of it the three truck routes from Valhalla. Weather (~0.5 s), warnings and place names are local reads. The same trip again takes about 1.3 s: the routes come from Redis, the weather and timing are worked out again so they're never stale. The first trip after a deploy is slower (~10 s) while the forecast loads into memory.
 - With TomTom instead of Valhalla, routing alone takes 2–8 s; with Open-Meteo instead of the local forecast, weather takes 1–4 s.
 - A full trip response is ~50 KB gzipped; the slider and charts never call the API. The map's place layers (~85 KB) and warning outlines (~75 KB) load once, when switched on.
 - Moving the slider only recolours the heatmap layer; route geometry is built once per trip.
