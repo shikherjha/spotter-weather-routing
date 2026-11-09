@@ -144,7 +144,8 @@ def build_grid_map(g: dict[str, float], area: BaseGeometry) -> GridMap:
 
 def _grid_map(handle: int, cache_dir: Path, area: BaseGeometry) -> GridMap:
     g = _grid_keys(handle)
-    path = cache_dir / f"grid-{hashlib.sha1(json.dumps(g, sort_keys=True).encode()).hexdigest()[:12]}.npz"
+    key = hashlib.sha1(json.dumps(g, sort_keys=True).encode() + area.wkb).hexdigest()[:12]
+    path = cache_dir / f"grid-{key}.npz"
     if path.exists():
         with np.load(path) as z:
             return GridMap(z["cells"], z["index"])
@@ -271,6 +272,9 @@ async def sync(root: Path, area: BaseGeometry) -> Path | None:
         return parse_idx(resp.text, url) if resp.is_success else []
 
     messages = [m for part in await asyncio.gather(*(idx(fh) for fh in wanted)) for m in part]
+    if not messages:
+        log.warning("NBM %s lists no fields we use", run_id)
+        return None
     root.mkdir(parents=True, exist_ok=True)
     grid: GridMap | None = None
     inst: dict[str, dict[int, np.ndarray]] = defaultdict(dict)
