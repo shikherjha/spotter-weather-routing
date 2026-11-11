@@ -32,3 +32,9 @@ var/
 
 # Brief (not ours to publish)
 reference/
+
+# walkthrough video tooling
+video/node_modules/
+video/out/
+video/my-voice.*
+video/*.mp4

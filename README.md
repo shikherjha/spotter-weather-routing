@@ -7,6 +7,8 @@ It's a pre-trip check, not a navigation app: decide here which road and when, th
 **Live app:** https://spotter-weather-routing-khaki.vercel.app
 &nbsp;·&nbsp; **API docs:** https://api-production-e386.up.railway.app/api/docs
 
+**Walkthrough video (5 min):** https://www.loom.com/share/d101ca212baa4b2fb0510c98d865c318 — the product, the architecture on diagrams, then the code.
+
 > The real forecast is calm most days. To see the product working, click **"Or try Dallas → Denver in a simulated storm"** on the plan form. That trip uses a clearly labelled, made-up storm (snow on Raton Pass, high wind on I-70, rain in Oklahoma); everything else — routes, timing, rules, ranking, warnings triage — is real.
 
 ![Results for Dallas to Denver in the simulated storm](docs/img/results.png)
